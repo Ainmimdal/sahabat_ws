@@ -14,10 +14,12 @@ setup(
             'urdf/sahabat_robot.urdf.xacro',
         ]),
 
-        # ('share/' + package_name + '/map', [
-        #     'map/sahabat_map.yaml',
-        #     'map/sahabat_map.pgm',
-        # ]),
+        ('share/' + package_name + '/map', [
+            'map/map_save.yaml',
+            'map/map_save.pgm',
+            'map/map_serial.data',
+            'map/map_serial.posegraph'
+        ]),
         
         ('share/' + package_name + '/launch', [
             'launch/sahabat_launch.py',
@@ -26,6 +28,7 @@ setup(
         ]),
         ('share/' + package_name + '/config', [
             'config/mapper_params_online_async.yaml',
+            'config/nav2_params.yaml'
         ]),
  
     ],
@@ -38,7 +41,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'rpm2odom = shbat_pkg.rpm2odom:main',
+            'rpm_to_odom = shbat_pkg.rpm_to_odom:main',
             'kalman_filter = shbat_pkg.kalman_filter:main',
             'joy2cmd = shbat_pkg.joy2cmd:main',
             'base_controller = shbat_pkg.base_controller:main',

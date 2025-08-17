@@ -93,7 +93,7 @@ def generate_launch_description():
         output='screen',
         parameters=[
             {'device_model': 'MS200'},
-            {'frame_id': 'base_link'},
+            {'frame_id': 'lidar_link'},
             {'scan_topic': 'scan'},
             {'port_name': lidar_port},
             {'baudrate': 230400},
@@ -113,7 +113,12 @@ def generate_launch_description():
         output='screen',
         parameters=[{'serial_port': imu_port}]  # Change '/dev/ttyUSB0' to your actual serial port if needed
     )
-
+    node_rpm2odom = Node(
+        package='shbat_pkg',
+        executable='rpm_to_odom',
+        name='rpm_to_odom',
+        output='screen'
+    )
     node_joy2cmd = Node(
         package='shbat_pkg',
         executable='joy2cmd',
@@ -137,7 +142,7 @@ def generate_launch_description():
 
     node_kalman_filter = Node(
         package='shbat_pkg',
-        executable='rpm_imu_odom_fusion',
+        executable='kalman_filter',
         name='kalman_filter',
         output='screen'
     )
@@ -149,7 +154,10 @@ def generate_launch_description():
         # node_rviz,
 
         node_joy_node,
-        node_joy2cmd,
+        node_joy2cmd,   
+
+        # node_rpm2odom,
+        node_kalman_filter,
 
         node_imu,
         node_lidar_scan,

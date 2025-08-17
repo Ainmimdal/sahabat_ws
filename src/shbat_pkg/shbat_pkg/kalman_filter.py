@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Int32
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TransformStamped
@@ -8,34 +8,60 @@ from tf2_ros import TransformBroadcaster
 import math
 
 
-class RpmImuOdomFusion(Node):
+class OdomFusion(Node):
     def __init__(self):
-        super().__init__('rpm_imu_odom_fusion')
-
-        # Robot parameters
-        self.wheel_radius = 0.1651  # meters
-        self.wheel_base = 0.25     # meters
-        self.rpm_to_rps = 2 * math.pi / 60
+        super().__init__('kalman_filter')
 
         # State variables
         self.x = 0.0
         self.y = 0.0
-        self.yaw = 0.0
+        self.theta = 0.0  # Dead-reckoning theta
+        self.yaw = 0.0    # IMU yaw
         self.last_time = self.get_clock().now()
 
-        # Subscribers
-        self.rpm_sub = self.create_subscription(Int32MultiArray, '/wheel_odom', self.rpm_callback, 10)
-        self.imu_sub = self.create_subscription(Imu, '/imu/data', self.imu_callback, 10)
-
-        # Publisher
-        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
-
-        # TF broadcaster
-        self.tf_broadcaster = TransformBroadcaster(self)
+        # Latest RPMs
+        self.left_rpm = 0
+        self.right_rpm = 0
 
         # IMU yaw tracking
         self.imu_yaw = 0.0
         self.imu_received = False
+
+        # Robot parameters
+        self.wheel_radius = 0.1651  # meters
+        self.wheel_base = 0.25      # meters
+        self.rpm_to_rps = 2 * math.pi / 60  # RPM to rad/s
+
+        # ROS interfaces
+        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        self.tf_broadcaster = TransformBroadcaster(self)
+        self.rpm_left_sub = self.create_subscription(
+            Int32,
+            'rpm_left',
+            self.rpm_left_callback,
+            10
+        )
+        self.rpm_right_sub = self.create_subscription(
+            Int32,
+            'rpm_right',
+            self.rpm_right_callback,
+            10
+        )
+        self.imu_sub = self.create_subscription(
+            Imu,
+            '/imu',
+            self.imu_callback,
+            10
+        )
+
+        # Timer to compute and publish odometry at 50Hz
+        self.create_timer(0.02, self.publish_odom)
+
+    def rpm_left_callback(self, msg):
+        self.left_rpm = msg.data
+
+    def rpm_right_callback(self, msg):
+        self.right_rpm = msg.data
 
     def imu_callback(self, msg):
         # Convert quaternion to yaw
@@ -45,7 +71,7 @@ class RpmImuOdomFusion(Node):
         self.imu_yaw = math.atan2(siny_cosp, cosy_cosp)
         self.imu_received = True
 
-    def rpm_callback(self, msg):
+    def publish_odom(self):
         if not self.imu_received:
             return  # Wait for first IMU data
 
@@ -53,17 +79,14 @@ class RpmImuOdomFusion(Node):
         dt = (current_time - self.last_time).nanoseconds / 1e9
         self.last_time = current_time
 
-        # Extract RPM
-        left_rpm = msg.data[0]
-        right_rpm = msg.data[1]
+        left_rps = self.left_rpm * self.rpm_to_rps
+        right_rps = self.right_rpm * self.rpm_to_rps
 
-        # Convert to velocities
-        left_rps = left_rpm * self.rpm_to_rps
-        right_rps = right_rpm * self.rpm_to_rps
         v_left = left_rps * self.wheel_radius
         v_right = right_rps * self.wheel_radius
 
         linear_vel = (v_right + v_left) / 2.0
+        angular_vel = (v_right - v_left) / self.wheel_base
 
         # Use IMU yaw for orientation
         self.yaw = self.imu_yaw
@@ -100,14 +123,14 @@ class RpmImuOdomFusion(Node):
         odom.pose.pose.orientation.w = math.cos(self.yaw / 2.0)
 
         odom.twist.twist.linear.x = linear_vel
-        odom.twist.twist.angular.z = 0.0  # Not used since yaw is from IMU
+        odom.twist.twist.angular.z = angular_vel
 
         self.odom_pub.publish(odom)
 
 
 def main(args=None):
     rclpy.init(args=args)
-    node = RpmImuOdomFusion()
+    node = OdomFusion()
     rclpy.spin(node)
     node.destroy_node()
     rclpy.shutdown()

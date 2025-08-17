@@ -109,27 +109,29 @@ void publish_msg(rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr &pub,
                  double scan_time, std::string frame_id, bool clockwise,
                  double angle_min, double angle_max, double min_range, double max_range)
 {
+  const int FIXED_NUM_POINTS = 448;
   sensor_msgs::msg::LaserScan scanMsg;
   int point_nums = scan_frame->vailtidy_point_num;
 
   scanMsg.header.stamp = start;
   scanMsg.header.frame_id = frame_id;
-  scanMsg.angle_min = Degree2Rad(scan_frame->data[0].angle);
-  scanMsg.angle_max = Degree2Rad(scan_frame->data[point_nums - 1].angle);
-  double diff = scan_frame->data[point_nums - 1].angle - scan_frame->data[0].angle;
-  scanMsg.angle_increment = Degree2Rad(diff/point_nums);
+
+  // Set angle_min and angle_max for full 360 deg scan
+  scanMsg.angle_min = Degree2Rad(0.0);
+  scanMsg.angle_max = Degree2Rad(359.0); // or 360.0 if your lidar supports it
+
+  scanMsg.angle_increment = (scanMsg.angle_max - scanMsg.angle_min) / (FIXED_NUM_POINTS - 1);
   scanMsg.scan_time = scan_time;
-  scanMsg.time_increment = scan_time / point_nums;
+  scanMsg.time_increment = scan_time / FIXED_NUM_POINTS;
   scanMsg.range_min = min_range;
   scanMsg.range_max = max_range;
 
-  scanMsg.ranges.assign(point_nums, std::numeric_limits<float>::quiet_NaN());
-  scanMsg.intensities.assign(point_nums, std::numeric_limits<float>::quiet_NaN());
+  scanMsg.ranges.assign(FIXED_NUM_POINTS, std::numeric_limits<float>::quiet_NaN());
+  scanMsg.intensities.assign(FIXED_NUM_POINTS, std::numeric_limits<float>::quiet_NaN());
 
   float range = 0.0;
   float intensity = 0.0;
   float dir_angle;
-  unsigned int last_index = 0;
 
   for (int i = 0; i < point_nums; i++)
   {
@@ -145,6 +147,7 @@ void publish_msg(rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr &pub,
     if (!clockwise)
     {
       dir_angle = static_cast<float>(360.f - scan_frame->data[i].angle);
+      if (dir_angle >= 360.f) dir_angle -= 360.f;
     }
     else
     {
@@ -157,31 +160,12 @@ void publish_msg(rclcpp::Publisher<sensor_msgs::msg::LaserScan>::SharedPtr &pub,
       intensity = 0;
     }
 
-    float angle = Degree2Rad(dir_angle);
-    unsigned int index = (unsigned int)((angle - scanMsg.angle_min) / scanMsg.angle_increment);
-    if (index < point_nums)
+    // Map angle to fixed index
+    int index = static_cast<int>(round((Degree2Rad(dir_angle) - scanMsg.angle_min) / scanMsg.angle_increment));
+    if (index >= 0 && index < FIXED_NUM_POINTS)
     {
-      // If the current content is Nan, it is assigned directly
-      if (std::isnan(scanMsg.ranges[index]))
-      {
-        scanMsg.ranges[index] = range;
-        unsigned int err = index - last_index;
-        if (err == 2)
-        {
-          scanMsg.ranges[index - 1] = range;
-          scanMsg.intensities[index - 1] = intensity;
-        }
-      }
-      else
-      { // Otherwise, only when the distance is less than the current
-        //   value, it can be re assigned
-        if (range < scanMsg.ranges[index])
-        {
-          scanMsg.ranges[index] = range;
-        }
-      }
+      scanMsg.ranges[index] = range;
       scanMsg.intensities[index] = intensity;
-      last_index = index;
     }
   }
 
