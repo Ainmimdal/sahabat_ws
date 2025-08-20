@@ -6,8 +6,8 @@ import requests
 
 CAN_EFF_FLAG = 0x80000000
 RPM_FLAG = 0x300
-LEFT_ID = 15
-RIGHT_ID = 33
+LEFT_ID = 33
+RIGHT_ID = 15
 
 def status_flag(sa):
     return 0x900 | (sa & 0xFF) | CAN_EFF_FLAG
