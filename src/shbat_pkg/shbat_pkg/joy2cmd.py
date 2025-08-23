@@ -20,7 +20,7 @@ class Joy2CmdNode(Node):
 
         # Adjustable max speeds
         self.max_linear_speed = 17.0   # m/s, adjust as needed
-        self.max_angular_speed = 100.0 # rad/s, adjust as needed
+        self.max_angular_speed = 50.0 # rad/s, adjust as needed
 
     def joy_callback(self, msg: Joy):
         twist = Twist()
