@@ -29,7 +29,8 @@ setup(
         ]),
         ('share/' + package_name + '/config', [
             'config/mapper_params_online_async.yaml',
-            'config/nav2_params.yaml'
+            'config/localization__params_online_async.yaml',
+            'config/nav2_params.yaml',
         ]),
  
     ],
