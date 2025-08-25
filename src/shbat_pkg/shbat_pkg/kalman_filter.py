@@ -58,10 +58,10 @@ class OdomFusion(Node):
         self.create_timer(0.02, self.publish_odom)
 
     def rpm_left_callback(self, msg):
-        self.left_rpm = msg.data
+        self.left_rpm = msg.data * 0.0357
 
     def rpm_right_callback(self, msg):
-        self.right_rpm = msg.data
+        self.right_rpm = msg.data * 0.0357
 
     def imu_callback(self, msg):
         # Convert quaternion to yaw

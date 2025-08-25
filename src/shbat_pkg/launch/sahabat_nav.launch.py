@@ -7,7 +7,7 @@ from launch.actions import DeclareLaunchArgument, GroupAction, SetEnvironmentVar
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import LoadComposableNodes
-from launch_ros.actions import Node
+from launch_ros.actions import Node 
 from launch_ros.descriptions import ComposableNode, ParameterFile
 from nav2_common.launch import RewrittenYaml
 
@@ -254,5 +254,20 @@ def generate_launch_description():
     # Add the actions to launch all of the navigation nodes
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
+
+    # Add SLAM Toolbox online async node
+    slam_toolbox_node = Node(
+        package='slam_toolbox',
+        executable='async_slam_toolbox_node',
+        name='slam_toolbox',
+        output='screen',
+        parameters=[
+            os.path.join(bringup_dir, 'config', 'localization__params_online_async.yaml'),
+            {'use_sim_time': False}
+        ],
+    )
+
+    # Add the SLAM Toolbox node
+    ld.add_action(slam_toolbox_node)
 
     return ld
