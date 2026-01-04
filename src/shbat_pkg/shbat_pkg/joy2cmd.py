@@ -18,9 +18,9 @@ class Joy2CmdNode(Node):
         # Publisher for /cmd_vel topic
         self.publisher_ = self.create_publisher(Twist, 'cmd_vel', 10)
 
-        # Adjustable max speeds
-        self.max_linear_speed = 17.0   # m/s, adjust as needed
-        self.max_angular_speed = 50.0 # rad/s, adjust as needed
+        # Adjustable max speeds (conservative for indoor use)
+        self.max_linear_speed = 0.5   # m/s (0.5 = walking pace, 1.0 = fast walk)
+        self.max_angular_speed = 1.0  # rad/s (1.0 = ~57 deg/s, safe turning)
 
     def joy_callback(self, msg: Joy):
         twist = Twist()

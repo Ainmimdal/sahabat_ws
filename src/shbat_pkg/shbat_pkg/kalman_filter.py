@@ -27,13 +27,14 @@ class OdomFusion(Node):
         self.imu_yaw = 0.0
         self.imu_received = False
 
-        # Robot parameters
-        self.wheel_radius = 0.1651  # meters
-        self.wheel_base = 0.25      # meters
+        # Robot parameters - MUST match base_controller.py
+        self.wheel_radius = 0.1524  # meters (6 inch wheels)
+        self.wheel_base = 0.33      # meters (distance between wheels)
         self.rpm_to_rps = 2 * math.pi / 60  # RPM to rad/s
 
         # ROS interfaces
-        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        # Publishing to /wheel_odom as backup (ZED publishes primary /odom)
+        self.odom_pub = self.create_publisher(Odometry, '/wheel_odom', 10)
         self.tf_broadcaster = TransformBroadcaster(self)
         self.rpm_left_sub = self.create_subscription(
             Int32,
@@ -58,10 +59,12 @@ class OdomFusion(Node):
         self.create_timer(0.02, self.publish_odom)
 
     def rpm_left_callback(self, msg):
-        self.left_rpm = msg.data * 0.0357
+        # RPM comes from CAN feedback - use directly without scaling
+        self.left_rpm = msg.data
 
     def rpm_right_callback(self, msg):
-        self.right_rpm = msg.data * 0.0357
+        # RPM comes from CAN feedback - use directly without scaling
+        self.right_rpm = msg.data
 
     def imu_callback(self, msg):
         # Convert quaternion to yaw
@@ -98,22 +101,26 @@ class OdomFusion(Node):
         self.x += delta_x
         self.y += delta_y
 
-        # Publish TF
-        t = TransformStamped()
-        t.header.stamp = current_time.to_msg()
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_link'
-        t.transform.translation.x = self.x
-        t.transform.translation.y = self.y
-        t.transform.translation.z = 0.0
-        t.transform.rotation.z = math.sin(self.yaw / 2.0)
-        t.transform.rotation.w = math.cos(self.yaw / 2.0)
-        self.tf_broadcaster.sendTransform(t)
+        # NOTE: TF publishing disabled - robot_localization EKF will publish odom->base_link
+        # The EKF fuses /wheel_odom (this node) with /zed2i/zed_node/odom (ZED visual odometry)
+        # 
+        # # Publish TF (odom->base_link from wheel odometry, as backup)
+        # # Note: ZED also publishes this TF - in production, only one should be active
+        # t = TransformStamped()
+        # t.header.stamp = current_time.to_msg()
+        # t.header.frame_id = 'wheel_odom'  # Different frame to avoid conflict with ZED
+        # t.child_frame_id = 'base_link'
+        # t.transform.translation.x = self.x
+        # t.transform.translation.y = self.y
+        # t.transform.translation.z = 0.0
+        # t.transform.rotation.z = math.sin(self.yaw / 2.0)
+        # t.transform.rotation.w = math.cos(self.yaw / 2.0)
+        # self.tf_broadcaster.sendTransform(t)
 
-        # Publish Odometry
+        # Publish Odometry (message only, no TF - EKF will consume this)
         odom = Odometry()
         odom.header.stamp = current_time.to_msg()
-        odom.header.frame_id = 'odom'
+        odom.header.frame_id = 'odom'  # Changed to 'odom' for EKF compatibility
         odom.child_frame_id = 'base_link'
 
         odom.pose.pose.position.x = self.x
@@ -122,8 +129,25 @@ class OdomFusion(Node):
         odom.pose.pose.orientation.z = math.sin(self.yaw / 2.0)
         odom.pose.pose.orientation.w = math.cos(self.yaw / 2.0)
 
+        # Add covariance for pose (6x6 matrix: x, y, z, roll, pitch, yaw)
+        # Values tuned for wheel odometry + IMU fusion
+        odom.pose.covariance[0] = 0.01   # x variance (m^2)
+        odom.pose.covariance[7] = 0.01   # y variance (m^2)
+        odom.pose.covariance[14] = 1e6   # z variance (not used, set high)
+        odom.pose.covariance[21] = 1e6   # roll variance (not used)
+        odom.pose.covariance[28] = 1e6   # pitch variance (not used)
+        odom.pose.covariance[35] = 0.05  # yaw variance (rad^2) - IMU based, fairly accurate
+
         odom.twist.twist.linear.x = linear_vel
         odom.twist.twist.angular.z = angular_vel
+
+        # Add covariance for twist (6x6 matrix: vx, vy, vz, vroll, vpitch, vyaw)
+        odom.twist.covariance[0] = 0.02   # linear x velocity variance
+        odom.twist.covariance[7] = 1e6    # linear y variance (not used)
+        odom.twist.covariance[14] = 1e6   # linear z variance (not used)
+        odom.twist.covariance[21] = 1e6   # angular x variance (not used)
+        odom.twist.covariance[28] = 1e6   # angular y variance (not used)
+        odom.twist.covariance[35] = 0.1   # angular z velocity variance
 
         self.odom_pub.publish(odom)
 

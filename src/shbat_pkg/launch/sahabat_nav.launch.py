@@ -255,19 +255,8 @@ def generate_launch_description():
     ld.add_action(load_nodes)
     ld.add_action(load_composable_nodes)
 
-    # Add SLAM Toolbox online async node
-    slam_toolbox_node = Node(
-        package='slam_toolbox',
-        executable='async_slam_toolbox_node',
-        name='slam_toolbox',
-        output='screen',
-        parameters=[
-            os.path.join(bringup_dir, 'config', 'localization__params_online_async.yaml'),
-            {'use_sim_time': False}
-        ],
-    )
-
-    # Add the SLAM Toolbox node
-    ld.add_action(slam_toolbox_node)
+    # Note: RTAB-Map already publishes map->odom and /map; do not start slam_toolbox here
+    # to avoid conflicting TFs and duplicate mapping. If you want slam_toolbox instead of
+    # RTAB-Map, launch it in a separate mode without RTAB-Map.
 
     return ld

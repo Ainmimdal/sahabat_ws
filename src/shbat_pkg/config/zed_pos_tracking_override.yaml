@@ -1,0 +1,11 @@
+---
+/**:
+  ros__parameters:
+    pos_tracking:
+      set_gravity_as_origin: true
+      floor_alignment: true
+      two_d_mode: true
+      fixed_z_value: 0.0
+      base_frame: 'base_link'
+      publish_tf: true
+      publish_map_tf: false

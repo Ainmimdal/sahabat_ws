@@ -1,12 +1,12 @@
 <?xml version = "1.0"?>
 <robot name="sahabat_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-<!-- Parameters -->
+<!-- Parameters for ZED Camera Integration -->
 <xacro:arg name="camera_name" default="zed2i" />
 <xacro:arg name="camera_model" default="zed2i" />
 <xacro:arg name="use_zed_localization" default="true" />
 
-<!-- Include ZED camera macro -->
+<!-- Include ZED camera macro from zed_wrapper package -->
 <xacro:include filename="$(find zed_wrapper)/urdf/zed_macro.urdf.xacro" />
 
 <!--BASE LINK-->
@@ -183,7 +183,7 @@
     <origin xyz = "0.05 0 0" /> 
 </joint>
 
-    <!-- LiDAR componenets-->
+<!-- LiDAR componenets-->
 
 <joint name="lidar_joint" type="fixed">
     <parent link="body_link"/>
@@ -211,5 +211,40 @@
         <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.01"/>
     </inertial>
 </link>
+
+<!-- Add ZED Camera using macro from zed_wrapper -->
+<!-- The macro requires a gnss_origin block parameter (even if empty) -->
+<xacro:zed_camera name="$(arg camera_name)" model="$(arg camera_model)">
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+</xacro:zed_camera>
+
+<!-- Add joint to connect ZED Camera to robot -->
+<!-- Following ZED tutorial: when use_zed_localization=true, camera_link is parent of base_link -->
+<xacro:if value="$(arg use_zed_localization)">
+    <!-- ZED Localization -> The reference link is 'zed2i_camera_link' and 'base_link' is a child -->
+    <!-- Physical setup: camera is mounted 5cm forward, 67cm up, tilted 8° DOWN from base_link
+         When camera is parent (publishing odometry):
+         - Camera points down 8° in world frame
+         - Base_link is BEHIND and BELOW camera, rotated to stay level with ground
+         - So base_link has +8° pitch relative to camera (camera sees base tilted up)
+    -->
+    <joint name="$(arg camera_name)_joint" type="fixed">
+        <parent link="$(arg camera_name)_camera_link"/>
+        <child link="base_link"/>
+        <!-- Flat mount: no pitch/roll between camera and base, camera is 0.05m forward and 0.67m above base_link -->
+        <origin xyz="-0.05 0.0 0.00" rpy="0 0 0"/>
+    </joint>
+</xacro:if>
+
+<xacro:unless value="$(arg use_zed_localization)">
+    <!-- NO ZED Localization -> 'zed2i_camera_link' is a child of 'base_link' -->
+    <!-- Camera is 5cm forward, 67cm up, 8° pitched down from base_link -->
+    <joint name="$(arg camera_name)_joint" type="fixed">
+        <parent link="base_link"/>
+        <child link="$(arg camera_name)_camera_link"/>
+        <!-- Flat mount: no pitch/roll between base and camera -->
+        <origin xyz="0.05 0.0 0.00" rpy="0 0 0"/>
+    </joint>
+</xacro:unless>
 
 </robot>

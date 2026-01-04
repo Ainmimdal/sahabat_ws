@@ -1,0 +1,123 @@
+### ekf_filter_node Configuration for Odometry Fusion
+### 
+### This EKF (Extended Kalman Filter) fuses TWO odometry sources:
+### 1. /wheel_odom from kalman_filter.py (already fuses wheel encoders + IMU)
+### 2. /zed2i/zed_node/odom from ZED wrapper (visual odometry)
+###
+### Output: /odometry/filtered (fused, best estimate)
+### TF Output: odom -> base_link (single clean transform for Nav2)
+
+ekf_filter_node:
+  ros__parameters:
+    # The frequency, in Hz, at which the filter will output a position estimate
+    frequency: 50.0
+    
+    # Sensor timeout in seconds. If we don't receive a measurement for this time, we discard it
+    sensor_timeout: 0.2
+    
+    # Gallery robot operates on flat floor (2D motion only)
+    two_d_mode: true
+    
+    # Use the transform tree (TF) for odometry frame transformations
+    transform_time_offset: 0.0
+    transform_timeout: 0.0
+    print_diagnostics: true
+    debug: false
+    
+    # EKF will publish the odom->base_link transform
+    publish_tf: true
+    publish_acceleration: false
+    
+    # Frame IDs
+    map_frame: map
+    odom_frame: odom                 # EKF publishes odom->base_link
+    base_link_frame: base_link
+    world_frame: odom
+
+    # -------------------------------------------------------------------
+    # Sensor 1: ZED Odometry (PRIMARY - pose + twist)
+    # Topic: /zed2i/zed_node/odom
+    # HIGH TRUST - Visual odometry is most accurate for positioning
+    # -------------------------------------------------------------------
+    odom1: /zed2i/zed_node/odom
+    odom1_config: [true,  true,  false,   # use position x, y
+       false, false, true,    # use orientation yaw
+       true,  false, false,   # use linear velocity vx
+       false, false, true,    # use angular velocity wz
+       false, false, false]
+    odom1_queue_size: 10
+    odom1_nodelay: false
+    odom1_differential: false
+    odom1_relative: false
+    odom1_pose_rejection_threshold: 5.0  # Reduced from 10.0 - trust more
+    odom1_twist_rejection_threshold: 2.0  # Reduced from 10.0 - trust more
+
+    # -------------------------------------------------------------------
+    # Sensor 2: Wheel Odometry (velocities + angular velocity)
+    # Topic: /wheel_odom (from kalman_filter.py - wheel + IMU)
+    # Configuration: Use only twist (vx, wz) - backup for ZED
+    # LOWER TRUST - wheels can slip, encoders have noise
+    # -------------------------------------------------------------------
+    odom0: /wheel_odom
+    odom0_config: [false, false, false,   # Don't use position
+       false, false, false,   # Don't use orientation
+       true,  false, false,   # Use linear velocity (vx only for diff-drive)
+       false, false, true,    # Use angular velocity (yaw)
+       false, false, false]   # No acceleration
+    odom0_queue_size: 10
+    odom0_nodelay: false
+    odom0_differential: false
+    odom0_relative: false
+    # High rejection threshold - only use when ZED is degraded
+    odom0_pose_rejection_threshold: 2.0  # Increased from 0.5
+    odom0_twist_rejection_threshold: 1.0  # Increased from 0.5
+
+    # -------------------------------------------------------------------
+    # Sensor 3: IMU (orientation yaw + angular velocity)
+    # Topic: /imu (external N100 or ZED IMU depending on launch arg)
+    # -------------------------------------------------------------------
+    imu0: /imu
+    imu0_config: [false, false, false,   # position
+       false, false, true,    # orientation (yaw only)
+       false, false, false,   # linear velocity
+       false, false, true,    # angular velocity (yaw rate)
+       false, false, false]   # acceleration unused
+    imu0_nodelay: false
+    imu0_differential: false
+    imu0_relative: false
+    imu0_queue_size: 20
+    
+    # -------------------------------------------------------------------
+    # Process noise covariance matrix (15x15 for 2D mode)
+    # VERY LOW = trust ZED sensor measurements over model predictions
+    # -------------------------------------------------------------------
+    process_noise_covariance: [0.005, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.005, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.01, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.01, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.01, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.003, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.01, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.005, 0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003,0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.003]
+    initial_estimate_covariance: [1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,  0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9, 0.0,
+              0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1e-9]
