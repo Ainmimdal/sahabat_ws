@@ -1,0 +1,24 @@
+# ZED Depth to LaserScan Configuration
+# Converts ZED depth image to virtual laser scan for obstacle detection
+#
+# This creates a "virtual LIDAR" from the ZED camera that:
+# - Sees obstacles the physical LIDAR might miss (different height)
+# - Provides front-facing obstacle detection
+# - Works alongside the 360° LIDAR for full coverage
+
+# Parameters for depthimage_to_laserscan node
+# Scan timing (should match ZED frame rate)
+scan_time: 0.067  # ~15 Hz to match ZED grab rate
+
+# Range limits (match ZED depth settings)
+range_min: 0.3    # ZED minimum depth
+range_max: 8.0    # Practical max for indoor use
+
+# Which row(s) of the depth image to use for the scan
+# Higher = looks at floor level, Lower = looks higher
+# ZED 2i VGA is 376 rows, center is ~188
+# We scan slightly below center to catch floor-level obstacles
+scan_height: 10   # Use 10 rows for more robust detection
+
+# Output frame (will be set by launch file)
+output_frame: "zed_left_camera_frame"

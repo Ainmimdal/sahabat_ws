@@ -1,0 +1,305 @@
+### Nav2 Configuration for Odom-Only Navigation (No Map, No AMCL)
+### 
+### Use Case: Testing navigation with wheel odometry + IMU + LIDAR
+### - No pre-built map required
+### - Uses odom frame for both local and global planning
+### - LIDAR for obstacle detection
+### - EKF provides odom->base_link transform
+### - Static map->odom transform (identity)
+###
+### This is Phase 1 testing before adding map-based localization.
+
+# No AMCL needed - we use static map->odom transform
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: False
+    global_frame: map            # CHANGED: use map frame for localization
+    robot_base_frame: base_link
+    odom_topic: /odom            # EKF filtered odometry
+    bt_loop_duration: 10
+    default_server_timeout: 20
+    wait_for_service_timeout: 1000
+    transform_tolerance: 1.0
+    # Nav2 default behavior trees - NOT setting these params uses the package defaults
+    # The defaults are defined in the bt_navigator source code
+    plugin_lib_names:
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+
+controller_server:
+  ros__parameters:
+    use_sim_time: False
+    controller_frequency: 20.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5   # No lateral movement (diff drive)
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 0.3
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
+    controller_plugins: ["FollowPath"]
+    odom_topic: /odom
+
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.3
+      movement_time_allowance: 20.0
+
+    general_goal_checker:
+      stateful: True               # Once in tolerance, stay "reached" even if drifts slightly
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.20      # 20cm position tolerance - good balance
+      yaw_goal_tolerance: 0.20     # ~11 degrees - reasonable orientation matching
+
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+      desired_linear_vel: 0.3      # Normal cruising speed
+      max_linear_vel: 0.5          # Max 0.5 m/s for safety
+      min_linear_vel: 0.05         # Back to original
+      max_angular_vel: 0.5         # 0.5 rad/s for 10Hz LIDAR sync
+      min_angular_vel: 0.05        # Back to original
+      lookahead_dist: 0.5          # Back to original
+      min_lookahead_dist: 0.3      # Back to original
+      max_lookahead_dist: 0.9
+      lookahead_time: 1.5
+      use_rotate_to_heading: true
+      rotate_to_heading_angular_vel: 0.4  # Back to original
+      rotate_to_heading_min_angle: 0.15   # Keep this - only rotate if >8.5 degrees off
+      transform_tolerance: 0.5
+      use_velocity_scaled_lookahead_dist: true
+      allow_reversing: false
+      use_regulated_linear_velocity_scaling: true
+      use_cost_regulated_linear_velocity_scaling: false  # DISABLED - was causing slowdown near obstacles
+      use_collision_detection: true
+      cost_scaling_dist: 0.3       # Reduced from 0.5
+      cost_scaling_gain: 0.5       # Reduced from 1.0 - less aggressive slowdown
+      inflation_cost_scaling_factor: 3.0
+      regulated_linear_scaling_min_radius: 0.9
+      regulated_linear_scaling_min_speed: 0.15  # Higher min speed near obstacles
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_link
+      use_sim_time: False
+      rolling_window: true
+      width: 4                     # 4m x 4m local costmap
+      height: 4
+      resolution: 0.05             # 5cm resolution
+      robot_radius: 0.25           # 25cm robot radius
+      plugins: ["voxel_layer", "inflation_layer"]
+      
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: True
+        publish_voxel_map: False   # Set True for debugging
+        origin_z: 0.0
+        z_resolution: 0.1          # 10cm vertical resolution
+        z_voxels: 10               # 10 voxels = 1m height
+        max_obstacle_height: 1.0   # Obstacles up to 1m
+        min_obstacle_height: 0.05  # Ignore ground (below 5cm)
+        mark_threshold: 0          # Mark cell as obstacle if any point hits
+        unknown_threshold: 15
+        observation_sources: scan zed_pointcloud
+        
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 7.0
+          obstacle_min_range: 0.15
+          
+        zed_pointcloud:
+          topic: /zed/zed_node/point_cloud/cloud_registered
+          max_obstacle_height: 1.0   # ZED obstacles up to 1m
+          min_obstacle_height: 0.05  # Ignore ground
+          clearing: True
+          marking: True
+          data_type: "PointCloud2"
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.3
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.3
+          
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.35     # 35cm inflation
+        
+      always_send_full_costmap: True
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 5.0        # INCREASED: faster updates
+      publish_frequency: 2.0       # INCREASED: for RViz
+      global_frame: map            # CHANGED: use map frame for localization
+      robot_base_frame: base_link
+      use_sim_time: False
+      rolling_window: false        # CHANGED: use full static map
+      resolution: 0.05             # 5cm resolution
+      robot_radius: 0.25
+      track_unknown_space: true    # Track unknown space
+      transform_tolerance: 1.0     # Added: for TF timing
+      plugins: ["static_layer", "voxel_layer", "inflation_layer"]
+      
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: True
+      
+      voxel_layer:
+        plugin: "nav2_costmap_2d::VoxelLayer"
+        enabled: True
+        publish_voxel_map: False
+        origin_z: 0.0
+        z_resolution: 0.1
+        z_voxels: 10
+        max_obstacle_height: 1.0
+        min_obstacle_height: 0.05
+        mark_threshold: 0
+        unknown_threshold: 15
+        observation_sources: scan zed_pointcloud
+        
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.0
+          clearing: True
+          marking: True
+          data_type: "LaserScan"
+          raytrace_max_range: 8.0
+          raytrace_min_range: 0.0
+          obstacle_max_range: 7.0
+          obstacle_min_range: 0.15
+          
+        zed_pointcloud:
+          topic: /zed/zed_node/point_cloud/cloud_registered
+          max_obstacle_height: 1.0
+          min_obstacle_height: 0.05
+          clearing: True
+          marking: True
+          data_type: "PointCloud2"
+          raytrace_max_range: 6.0
+          raytrace_min_range: 0.3
+          obstacle_max_range: 5.0
+          obstacle_min_range: 0.3
+          
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.35
+        
+      always_send_full_costmap: True
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 10.0
+    use_sim_time: False
+    transform_tolerance: 0.5
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+      use_astar: true
+      allow_unknown: true          # Allow planning through unknown space
+
+smoother_server:
+  ros__parameters:
+    use_sim_time: False
+    smoother_plugins: ["simple_smoother"]
+    simple_smoother:
+      plugin: "nav2_smoother::SimpleSmoother"
+      tolerance: 1.0e-10
+      max_its: 1000
+      do_refinement: True
+
+behavior_server:
+  ros__parameters:
+    costmap_topic: local_costmap/costmap_raw
+    footprint_topic: local_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading"
+    wait:
+      plugin: "nav2_behaviors/Wait"
+    global_frame: odom             # Use odom frame
+    robot_base_frame: base_link
+    transform_tolerance: 0.5
+    use_sim_time: False
+
+velocity_smoother:
+  ros__parameters:
+    use_sim_time: False
+    smoothing_frequency: 20.0
+    scale_velocities: False
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.5, 0.0, 0.5]      # [vx, vy, vtheta] - REDUCED angular for 10Hz LIDAR
+    min_velocity: [-0.3, 0.0, -0.5]    # Allow some reverse
+    max_accel: [1.0, 0.0, 1.0]         # Slower angular acceleration
+    max_decel: [-1.0, 0.0, -1.0]       # Slower angular deceleration
+    odom_topic: /odom
+    odom_duration: 0.1
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+
+waypoint_follower:
+  ros__parameters:
+    use_sim_time: False
+    loop_rate: 20
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: True
+      waypoint_pause_duration: 2000    # 2 seconds at each waypoint

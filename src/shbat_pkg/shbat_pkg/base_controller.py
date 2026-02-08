@@ -35,7 +35,7 @@ class BaseController(Node):
         # Declare parameters with defaults for 173mm wheel robot
         self.declare_parameter('port', '/dev/ttyUSB0')
         self.declare_parameter('baudrate', 115200)
-        self.declare_parameter('wheel_radius', 0.0865)  # 173mm diameter / 2 = 86.5mm
+        self.declare_parameter('wheel_radius', 0.0875)  # 175mm diameter / 2 = 87.5mm
         self.declare_parameter('wheel_base', 0.33)  # Distance between wheels in meters
         self.declare_parameter('publish_odom_tf', True)
         self.declare_parameter('odom_frame', 'odom')
@@ -83,12 +83,23 @@ class BaseController(Node):
             cmd_vel_qos
         )
         
+        # Emergency stop subscriber - directly stops motors
+        self.estop_sub = self.create_subscription(
+            Bool,
+            'emergency_stop',
+            self.emergency_stop_callback,
+            10
+        )
+        
         # Publishers
         self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
         self.motor_enabled_pub = self.create_publisher(Bool, 'motor_enabled', 10)
         
         # TF Broadcaster
         self.tf_broadcaster = TransformBroadcaster(self)
+        
+        # Emergency stop state
+        self.emergency_stopped = False
         
         # Odometry state
         self.x = 0.0
@@ -163,6 +174,30 @@ class BaseController(Node):
             self.get_logger().error(f'Failed to initialize ZLAC8015D driver: {e}')
             self.driver = None
 
+    def emergency_stop_callback(self, msg: Bool):
+        """
+        Handle emergency stop requests.
+        
+        When activated, immediately stops motors and ignores cmd_vel until cleared.
+        """
+        if msg.data and not self.emergency_stopped:
+            self.emergency_stopped = True
+            self.get_logger().warn('EMERGENCY STOP ACTIVATED - motors stopped!')
+            self.stop_motors()
+        elif not msg.data and self.emergency_stopped:
+            self.emergency_stopped = False
+            self.get_logger().info('Emergency stop cleared - motors enabled')
+    
+    def stop_motors(self):
+        """Immediately stop all motors."""
+        if self.driver:
+            try:
+                self.driver.set_rpm(0, 0)
+                self.target_linear_vel = 0.0
+                self.target_angular_vel = 0.0
+            except Exception as e:
+                self.get_logger().error(f'Failed to stop motors: {e}')
+
     def cmd_vel_callback(self, msg: Twist):
         """
         Handle incoming velocity commands.
@@ -170,6 +205,10 @@ class BaseController(Node):
         Converts twist message to differential drive wheel velocities.
         """
         if not self.driver:
+            return
+        
+        # If emergency stopped, ignore velocity commands
+        if self.emergency_stopped:
             return
         
         # Update last command time

@@ -1,0 +1,17 @@
+waypoints:
+- name: dock
+  x: 0.989
+  y: -0.387
+  yaw: -1.571
+- name: waypoint_2
+  x: -2.774
+  y: -3.241
+  yaw: -0.036
+- name: waypoint_3
+  x: -0.166
+  y: -7.244
+  yaw: -2.543
+- name: waypoint_4
+  x: -0.378
+  y: -9.054
+  yaw: 1.612

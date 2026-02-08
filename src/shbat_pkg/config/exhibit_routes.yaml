@@ -1,0 +1,108 @@
+# Exhibit Routes Configuration
+# 
+# This file defines:
+# 1. Exhibits - named locations with coordinates
+# 2. Routes - predefined paths between exhibits (via waypoints)
+#
+# The robot follows these routes instead of using the default path planner,
+# ensuring it takes sensible paths and avoids awkward areas.
+
+# Named exhibit locations
+exhibits:
+  entrance:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    description: "Main entrance / Starting point"
+  
+  exhibit_a:
+    x: 3.0
+    y: 1.5
+    yaw: 1.57
+    description: "Exhibit A - Modern Art"
+  
+  exhibit_b:
+    x: 5.0
+    y: 0.0
+    yaw: 0.0
+    description: "Exhibit B - Sculptures"
+  
+  exhibit_c:
+    x: 5.0
+    y: -2.0
+    yaw: -1.57
+    description: "Exhibit C - Photography"
+  
+  exhibit_d:
+    x: 2.0
+    y: -2.5
+    yaw: 3.14
+    description: "Exhibit D - Historical Gallery"
+
+# Predefined routes between exhibits
+# Each route is a list of intermediate waypoints (coordinates)
+# The robot follows these waypoints in order to reach the destination
+#
+# Format: "from->to": [[x1,y1,yaw1], [x2,y2,yaw2], ...]
+# If no route defined, robot will use direct navigation
+
+routes:
+  # From entrance to exhibits
+  "entrance->exhibit_a":
+    - [1.5, 0.5, 0.5]    # Turn right at corridor
+    - [2.5, 1.0, 1.0]    # Approach exhibit area
+    
+  "entrance->exhibit_b":
+    - [2.0, 0.0, 0.0]    # Go straight down main corridor
+    - [4.0, 0.0, 0.0]    # Continue
+    
+  "entrance->exhibit_c":
+    - [2.0, 0.0, 0.0]    # Go straight
+    - [4.0, 0.0, -0.5]   # Turn right
+    - [5.0, -1.0, -1.57] # Head to exhibit C
+
+  "entrance->exhibit_d":
+    - [1.0, -1.0, -1.57] # Turn left
+    - [1.5, -2.0, 3.14]  # Navigate around obstacle
+
+  # Between exhibits
+  "exhibit_a->exhibit_b":
+    - [4.0, 1.0, -0.5]   # Exit A, head towards B
+    
+  "exhibit_b->exhibit_c":
+    - [5.0, -1.0, -1.57] # Go down from B to C
+    
+  "exhibit_c->exhibit_d":
+    - [4.0, -2.0, 3.14]  # Head west
+    - [3.0, -2.5, 3.14]  # Continue to D
+
+  "exhibit_d->entrance":
+    - [1.0, -1.5, 1.0]   # Head back
+    - [0.5, -0.5, 0.5]   # Approach entrance
+
+# Default tour order
+default_tour:
+  - entrance
+  - exhibit_a
+  - exhibit_b
+  - exhibit_c
+  - exhibit_d
+  - entrance
+
+# Settings
+settings:
+  # Wait time at each exhibit (seconds)
+  wait_at_exhibit: 5.0
+  
+  # Announce arrival (for TTS integration)
+  announce_arrival: true
+  
+  # If route not defined, allow direct navigation
+  allow_direct_navigation: true
+  
+  # Battery thresholds (percentage)
+  battery_low_threshold: 30.0
+  battery_critical_threshold: 15.0
+  
+  # Obstruction detection (seconds without movement)
+  obstruction_timeout: 10.0

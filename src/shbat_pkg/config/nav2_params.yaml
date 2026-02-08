@@ -127,8 +127,8 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.15  # Slightly relaxed
-      yaw_goal_tolerance: 0.25  # Tightened for better orientation
+      xy_goal_tolerance: 0.25  # RELAXED: 25cm tolerance for reaching goal
+      yaw_goal_tolerance: 0.4  # RELAXED: ~23 degrees tolerance for orientation
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
@@ -210,17 +210,16 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 1.0
-      publish_frequency: 1.0
+      update_frequency: 5.0   # INCREASED: 5 Hz for responsive obstacle updates
+      publish_frequency: 2.0  # INCREASED: 2 Hz for RViz visualization
       global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      rolling_window: true  # CHANGED: Use rolling window for odometry-only navigation
-      width: 100  # 100 cells × 0.10m = 10m x 10m rolling window
-      height: 100
+      rolling_window: false   # CHANGED: Use full static map for localization mode
       robot_radius: 0.25
-      resolution: 0.10
+      resolution: 0.05        # CHANGED: 5cm for better path planning precision
       track_unknown_space: true
+      transform_tolerance: 1.0  # Added: tolerance for TF timing
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"

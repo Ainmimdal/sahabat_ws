@@ -1,0 +1,12 @@
+# Sahabat Robot USB Device Rules
+# Install: sudo cp 99-sahabat-robot.rules /etc/udev/rules.d/
+# Reload: sudo udevadm control --reload-rules && sudo udevadm trigger
+
+# Motor Controller (ZLAC8015D via FTDI RS485)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="A50285BI", SYMLINK+="motor", MODE="0666"
+
+# LIDAR (Oradar MS200 via FTDI)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="BG00Y2Y1", SYMLINK+="lidar", MODE="0666"
+
+# IMU (Wheeltec N100 via CP2102)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", ATTRS{serial}=="0001", SYMLINK+="imu", MODE="0666"

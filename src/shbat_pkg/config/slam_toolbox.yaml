@@ -1,0 +1,78 @@
+# slam_toolbox configuration for Sahabat Robot
+# Optimized for Orin Nano (async mode for low CPU usage)
+
+slam_toolbox:
+  ros__parameters:
+    # Plugin params
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    # ROS Parameters
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_link
+    scan_topic: /scan
+    use_scan_matching: true
+    use_scan_barycenter: true
+    
+    # Mode: async for low CPU usage
+    mode: mapping  # Change to 'localization' when using saved map
+
+    # Timing - async processing (lighter on CPU)
+    transform_timeout: 0.5           # INCREASED: more tolerance for TF delays
+    tf_buffer_duration: 30.0
+    throttle_scans: 1                # Process every scan
+    
+    # Map update frequency (lower = less CPU)
+    map_update_interval: 2.0         # DECREASED: update map more frequently
+    
+    # Resolution
+    resolution: 0.05                 # 5cm resolution (matches Nav2 costmap)
+    max_laser_range: 8.0             # Reduced from 12m - less noise from far readings
+    minimum_travel_distance: 0.3     # DECREASED: update more often during movement
+    minimum_travel_heading: 0.15     # DECREASED: ~8.5 degrees - much more responsive to rotation!
+    
+    # Noise filtering - IMPORTANT for clean maps
+    laser_min_range: 0.15    # Ignore readings closer than 15cm
+    laser_max_range: 8.0     # Ignore readings beyond 8m (noisy)
+    
+    # Scan matching parameters - tuned for rotation robustness
+    scan_buffer_size: 5              # DECREASED: less history, more responsive
+    scan_buffer_maximum_scan_distance: 8.0
+    link_match_minimum_response_fine: 0.15   # DECREASED: accept slightly lower match quality
+    link_scan_maximum_distance: 1.5
+    loop_search_maximum_distance: 3.0
+    do_loop_closing: true
+    loop_match_minimum_chain_size: 10
+    loop_match_maximum_variance_coarse: 3.0
+    loop_match_minimum_response_coarse: 0.35
+    loop_match_minimum_response_fine: 0.45
+
+    # Correlation Parameters - wider search for better rotation matching
+    correlation_search_space_dimension: 0.5
+    correlation_search_space_resolution: 0.01
+    correlation_search_space_smear_deviation: 0.1
+
+    # Loop closure parameters
+    loop_search_space_dimension: 8.0
+    loop_search_space_resolution: 0.05
+    loop_search_space_smear_deviation: 0.03
+
+    # Scan matcher parameters - more forgiving during rotation
+    distance_variance_penalty: 0.3   # DECREASED: less penalty for distance variance
+    angle_variance_penalty: 0.8      # DECREASED: less penalty for angle variance
+
+    fine_search_angle_offset: 0.00523        # INCREASED: ~0.3 degrees fine search
+    coarse_search_angle_offset: 0.524        # INCREASED: ~30 degrees coarse search
+    coarse_angle_resolution: 0.0262          # DECREASED: ~1.5 degrees - finer resolution
+    minimum_angle_penalty: 0.85              # DECREASED: more forgiving
+    minimum_distance_penalty: 0.4            # DECREASED: more forgiving
+    use_response_expansion: true
+
+    # State
+    debug_logging: false
+    stack_size_to_use: 40000000

@@ -1,7 +1,24 @@
 <?xml version = "1.0"?>
 <robot name="sahabat_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-<!-- Parameters -->
+<!-- ================================================== -->
+<!-- Robot Parameters (edit these to match your robot)  -->
+<!-- ================================================== -->
+
+<!-- Wheel dimensions: 175mm diameter hoverboard wheels -->
+<xacro:property name="wheel_radius" value="0.0875" />   <!-- 175mm / 2 = 87.5mm -->
+<xacro:property name="wheel_width" value="0.057" />     <!-- Wheel width/thickness -->
+<xacro:property name="wheel_base" value="0.33" />       <!-- Distance between wheels (center to center) -->
+
+<!-- Caster wheel radius -->
+<xacro:property name="caster_radius" value="0.03" />
+
+<!-- Body dimensions -->
+<xacro:property name="body_length" value="0.3" />
+<xacro:property name="body_width" value="0.35" />
+<xacro:property name="body_height" value="0.22" />
+
+<!-- Camera arguments -->
 <xacro:arg name="camera_name" default="zed2i" />
 <xacro:arg name="camera_model" default="zed2i" />
 <xacro:arg name="use_zed_localization" default="true" />
@@ -10,17 +27,19 @@
 <xacro:include filename="$(find zed_wrapper)/urdf/zed_macro.urdf.xacro" />
 
 <!--BASE LINK-->
+<!-- base_link is at wheel axle height (wheel_radius above ground) -->
 
 <link name = "base_link">
 
 </link>
 
 <!--BASEFOOTPRINT LINK-->
+<!-- base_footprint is the ground projection of the robot (at Z=0) -->
 
 <joint name="basefootprint_joint" type="fixed">
     <parent link="base_link"/>
     <child link="base_footprint"/>
-    <origin xyz="0 0 0" rpy = "0 0 0"/>
+    <origin xyz="0 0 ${-wheel_radius}" rpy = "0 0 0"/>
 </joint>
 
 <link name="base_footprint">
@@ -39,7 +58,7 @@
     <visual>
         <origin xyz = "0.15 0 0.11" />
         <geometry>
-            <box size = "0.3 0.35 0.22"/>
+            <box size = "${body_length} ${body_width} ${body_height}"/>
         </geometry>
 
         <material name = "blue"> 
@@ -50,7 +69,7 @@
     <collision>
         <origin xyz = "0.15 0 0.11" />
        <geometry>
-            <box size = "0.3 0.35 0.22"/>
+            <box size = "${body_length} ${body_width} ${body_height}"/>
         </geometry>
     </collision>
 
@@ -62,12 +81,13 @@
 
 
 <!--LEFT WHEEL-->
+<!-- Wheels are at base_link height (Z=0), which is the axle height -->
 
 <joint name = "left_wheel_joint" type = "continuous"> 
 
     <parent link= "base_link"/>
     <child link= "left_wheel_link"/>
-    <origin xyz = "0 0.2 0.05" rpy = "-1.571 3.142 0"/> 
+    <origin xyz = "0 ${wheel_base/2} 0" rpy = "-1.571 3.142 0"/> 
     <axis xyz = "0 0 1"/>
     
 </joint>
@@ -75,7 +95,7 @@
 <link name = "left_wheel_link">
     <visual>
         <geometry>
-            <cylinder length = "0.057" radius = "0.08"/>
+            <cylinder length = "${wheel_width}" radius = "${wheel_radius}"/>
         </geometry>
 
         <material name = "black">
@@ -85,7 +105,7 @@
 
     <collision>
         <geometry>
-            <cylinder length = "0.057" radius = "0.08"/>
+            <cylinder length = "${wheel_width}" radius = "${wheel_radius}"/>
         </geometry>
     </collision>
 
@@ -101,7 +121,7 @@
 
     <parent link = "base_link"/>
     <child link = "right_wheel_link"/>
-    <origin xyz = "0 -0.2 0.05" rpy = "1.571 0 0 "/> 
+    <origin xyz = "0 ${-wheel_base/2} 0" rpy = "1.571 0 0 "/> 
     <axis xyz = "0 0 -1"/>
 
 </joint>
@@ -110,7 +130,7 @@
 
     <visual>
         <geometry>
-            <cylinder length = "0.057" radius = "0.08"/>
+            <cylinder length = "${wheel_width}" radius = "${wheel_radius}"/>
         </geometry>
 
         <material name = "black">
@@ -120,7 +140,7 @@
 
     <collision>
         <geometry>
-            <cylinder length = "0.057" radius = "0.08"/>
+            <cylinder length = "${wheel_width}" radius = "${wheel_radius}"/>
         </geometry>
     </collision>
 
@@ -130,12 +150,13 @@
     </inertial> 
 </link>
 
-<!-- FRONT CASTER WHEELL-->
+<!-- FRONT CASTER WHEEL-->
+<!-- Caster bottom should touch ground: Z = -(wheel_radius - caster_radius) -->
 
 <link name = "front_caster_wheel_link" >
     <visual>
         <geometry>
-            <sphere radius= "0.03"/>
+            <sphere radius= "${caster_radius}"/>
         </geometry>
 
         <material name = "red" >
@@ -145,7 +166,7 @@
 
     <collision>
         <geometry>
-            <sphere radius= "0.03"/>
+            <sphere radius= "${caster_radius}"/>
         </geometry>
     </collision>
 
@@ -154,15 +175,17 @@
 <joint name = "front_caster_wheel_joint" type="fixed">
     <parent link = "body_link"/>
     <child link = "front_caster_wheel_link"/>
-    <origin xyz = "0.25 0 0" /> 
+    <origin xyz = "0.25 0 ${-(wheel_radius - caster_radius)}" /> 
 </joint>
 
 
 <!-- REAR CASTER WHEEL-->
+<!-- Caster bottom should touch ground: Z = -(wheel_radius - caster_radius) -->
+
 <link name = "rear_caster_wheel_link" >
     <visual>
         <geometry>
-            <sphere radius= "0.03"/>
+            <sphere radius= "${caster_radius}"/>
         </geometry>
 
         <material name = "purple" >
@@ -172,7 +195,7 @@
 
     <collision>
         <geometry>
-            <sphere radius= "0.03"/>
+            <sphere radius= "${caster_radius}"/>
         </geometry>
     </collision>
 </link>
@@ -180,7 +203,7 @@
 <joint name = "rear_caster_wheel_joint" type="fixed">
     <parent link = "body_link"/>
     <child link = "rear_caster_wheel_link"/>
-    <origin xyz = "0.05 0 0" /> 
+    <origin xyz = "0.05 0 ${-(wheel_radius - caster_radius)}" /> 
 </joint>
 
     <!-- LiDAR componenets-->

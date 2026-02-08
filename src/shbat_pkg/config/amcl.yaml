@@ -1,0 +1,71 @@
+# AMCL Configuration for Sahabat Robot
+# AMCL properly supports 2D Pose Estimate from RViz
+
+amcl:
+  ros__parameters:
+    use_sim_time: false
+    
+    # Frames
+    global_frame_id: map
+    odom_frame_id: odom
+    base_frame_id: base_link
+    
+    # Topics
+    scan_topic: /scan
+    
+    # Particle filter settings - MORE particles for global localization
+    min_particles: 3000
+    max_particles: 10000         # More particles to cover entire map
+    
+    # Update thresholds - update more frequently for faster convergence
+    update_min_d: 0.05       # 5cm translation
+    update_min_a: 0.1        # ~6 degrees rotation
+    
+    # Resample more frequently
+    resample_interval: 1
+    
+    # Transform tolerance
+    transform_tolerance: 1.0
+    
+    # Recovery - ENABLE for global localization (adds random particles when lost)
+    recovery_alpha_slow: 0.001   # Slow average weight filter
+    recovery_alpha_fast: 0.1     # Fast average weight filter
+    
+    # Laser model parameters
+    laser_model_type: likelihood_field
+    laser_max_range: 8.0
+    laser_min_range: 0.10
+    max_beams: 180
+    
+    # Likelihood field settings
+    z_hit: 0.95
+    z_rand: 0.05
+    sigma_hit: 0.1
+    
+    # Motion model (diff drive)
+    robot_model_type: nav2_amcl::DifferentialMotionModel
+    alpha1: 0.1
+    alpha2: 0.1
+    alpha3: 0.1
+    alpha4: 0.1
+    alpha5: 0.05
+    
+    # GLOBAL LOCALIZATION - spread particles across entire map
+    set_initial_pose: false      # Don't set a fixed initial pose
+    
+    # Initial covariance - VERY LARGE to spread particles across map
+    # These values spread particles across a ~20m x 20m area with all orientations
+    initial_cov_xx: 100.0        # 10m std dev in x (covers large map)
+    initial_cov_yy: 100.0        # 10m std dev in y
+    initial_cov_aa: 6.2832       # Full rotation uncertainty (2*pi)
+    
+    # First map only - don't wait for map update
+    first_map_only: false
+    
+    # Always accept initial pose from RViz (for manual correction if needed)
+    always_reset_initial_pose: false
+
+map_server:
+  ros__parameters:
+    use_sim_time: false
+    yaml_filename: ""  # Set via launch parameter

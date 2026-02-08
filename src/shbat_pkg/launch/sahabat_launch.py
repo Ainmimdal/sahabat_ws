@@ -268,12 +268,59 @@ def smart_detect_devices():
     
     return lidar_port, imu_port, motor_port
 
-# Detect all ports at launch time
-print("\n" + "="*50)
-print("USB Device Detection")
-print("="*50)
-lidar_port, imu_port, motor_port = smart_detect_devices()
-print("="*50 + "\n")
+# ============================================================================
+# Use fixed udev symlinks instead of auto-detection
+# Symlinks created by /etc/udev/rules.d/99-sahabat-robot.rules:
+#   /dev/motor → Motor controller (ZLAC8015D)
+#   /dev/lidar → LIDAR (Oradar MS200)
+#   /dev/imu   → IMU (Wheeltec N100)
+# ============================================================================
+
+def use_fixed_ports():
+    """Use udev symlinks for fixed port assignment."""
+    motor_port = '/dev/motor' if os.path.exists('/dev/motor') else None
+    lidar_port = '/dev/lidar' if os.path.exists('/dev/lidar') else None
+    imu_port = '/dev/imu' if os.path.exists('/dev/imu') else None
+    
+    print("\n" + "="*50)
+    print("USB Devices (udev symlinks)")
+    print("="*50)
+    
+    if motor_port:
+        real_port = os.path.realpath(motor_port)
+        print(f"✓ Motor: {motor_port} → {real_port}")
+    else:
+        print("✗ Motor: /dev/motor not found - fallback to detection")
+        
+    if lidar_port:
+        real_port = os.path.realpath(lidar_port)
+        print(f"✓ LIDAR: {lidar_port} → {real_port}")
+    else:
+        print("✗ LIDAR: /dev/lidar not found - fallback to detection")
+        
+    if imu_port:
+        real_port = os.path.realpath(imu_port)
+        print(f"✓ IMU:   {imu_port} → {real_port}")
+    else:
+        print("✗ IMU:   /dev/imu not found - fallback to detection")
+    
+    print("="*50 + "\n")
+    
+    return lidar_port, imu_port, motor_port
+
+# Try fixed ports first, fall back to auto-detection
+lidar_port, imu_port, motor_port = use_fixed_ports()
+
+# If any port is missing, try auto-detection as fallback
+if not all([lidar_port, imu_port, motor_port]):
+    print("Some devices not found via udev, trying auto-detection...")
+    detected_lidar, detected_imu, detected_motor = smart_detect_devices()
+    if not lidar_port:
+        lidar_port = detected_lidar
+    if not imu_port:
+        imu_port = detected_imu
+    if not motor_port:
+        motor_port = detected_motor
 
 def generate_launch_description():
     
@@ -396,7 +443,12 @@ def generate_launch_description():
         executable='imu_node',
         name='imu_node',
         output='screen',
-        parameters=[{'serial_port': imu_port_config}],
+        parameters=[{
+            'serial_port': imu_port_config,
+            'serial_baud': 921600,
+            'imu_topic': 'imu',
+            'imu_frame': 'imu_link',
+        }],
         condition=IfCondition(use_n100_imu)
     )
     node_rpm2odom = Node(
@@ -427,9 +479,9 @@ def generate_launch_description():
         parameters=[
             {'port': motor_port_config},
             {'baudrate': 115200},
-            {'wheel_radius': 0.0865},      # 173mm diameter wheel
+            {'wheel_radius': 0.0875},      # 175mm diameter wheel
             {'wheel_base': 0.33},          # Distance between wheels
-            {'publish_odom_tf': True},     # Publish odom->base_link TF
+            {'publish_odom_tf': False},    # EKF publishes odom->base_link TF instead
             {'odom_frame': 'odom'},
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},  # Odometry topic name
@@ -442,11 +494,29 @@ def generate_launch_description():
         ]
     )
 
+    # Legacy simple kalman filter (disabled - using robot_localization EKF instead)
     node_kalman_filter = Node(
         package='shbat_pkg',
         executable='kalman_filter',
         name='kalman_filter',
         output='screen',
+        condition=IfCondition('false')  # Disabled - use EKF instead
+    )
+
+    # EKF from robot_localization package for sensor fusion
+    # Fuses wheel odometry + IMU for better state estimation
+    pkg_share = get_package_share_directory(pkg_name)
+    ekf_config_path = os.path.join(pkg_share, 'config', 'ekf.yaml')
+    
+    node_ekf = Node(
+        package='robot_localization',
+        executable='ekf_node',
+        name='ekf_filter_node',
+        output='screen',
+        parameters=[ekf_config_path],
+        remappings=[
+            ('odometry/filtered', 'odom'),  # Output filtered odometry
+        ],
         condition=IfCondition(use_kalman_filter)
     )
 
@@ -470,9 +540,9 @@ def generate_launch_description():
         node_joy_node,
         node_joy2cmd,   
 
-        # Sensor fusion (conditional)
-        # node_rpm2odom,
-        node_kalman_filter,
+        # Sensor fusion - EKF (conditional)
+        # node_kalman_filter,  # Legacy simple filter - disabled
+        node_ekf,              # robot_localization EKF
 
         # Sensors (conditional based on detection)
         node_imu,
