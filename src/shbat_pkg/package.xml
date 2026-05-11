@@ -20,8 +20,8 @@
   <depend>robot_state_publisher</depend>
   <depend>tf2_ros</depend>
   <depend>slam_toolbox</depend>
-  <depend>wheeltec_n100_imu</depend>
-  <depend>oradar_lidar</depend>
+  <depend>witmotion_ros2</depend>
+  <depend>rplidar_ros</depend>
   <depend>joy</depend>
 
 

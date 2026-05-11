@@ -183,23 +183,23 @@ def generate_launch_description():
     
     # LIDAR publishes to /scan_raw, then scan_filter filters to /scan
     lidar_node = Node(
-        package='oradar_lidar',
-        executable='oradar_scan',
-        name='oradar_scan_node',
+        package='rplidar_ros',
+        executable='rplidar_node',
+        name='rplidar_node',
         output='screen',
         parameters=[
-            {'device_model': 'MS200'},
+            {'channel_type': 'serial'},
+            {'serial_port': lidar_port_cfg},
+            {'serial_baudrate': 1000000},
             {'frame_id': 'lidar_link'},
-            {'scan_topic': 'scan_raw'},      # Changed: output to scan_raw
-            {'port_name': lidar_port_cfg},
-            {'baudrate': 230400},
-            {'angle_min': 0.0},
-            {'angle_max': 360.0},
-            {'range_min': 0.0},
-            {'range_max': 12.0},
-            {'clockwise': False},
-            {'motor_speed': 10}
+            {'angle_min': -3.14},
+            {'angle_max': 3.14},
+            {'inverted': False},
+            {'clockwise': True},
+            {'angle_compensate': True},
+            {'scan_mode': 'DenseBoost'},
         ],
+        remappings=[('scan', 'scan_raw')],  # Route through scan_filter
         condition=IfCondition(use_lidar)
     )
     
@@ -218,16 +218,18 @@ def generate_launch_description():
     # ========== IMU ==========
     
     imu_node = Node(
-        package='wheeltec_n100_imu',
-        executable='imu_node',
-        name='imu_node',
+        package='witmotion_ros2',
+        executable='witmotion_ros2',
+        name='witmotion_node',
         output='screen',
         parameters=[{
-            'serial_port': imu_port_cfg,
-            'serial_baud': 921600,
-            'imu_topic': 'imu',
-            'imu_frame': 'imu_link',
+            'port': imu_port_cfg,
+            'baud_rate': 115200,
+            'update_rate': 50.0,
+            'frame_id': 'imu_link',
+            'topic_name': '/witmotion',
         }],
+        remappings=[('/witmotion/imu', '/imu')],
         condition=IfCondition(use_imu)
     )
 

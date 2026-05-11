@@ -177,17 +177,19 @@ local_costmap:
 global_costmap:
   global_costmap:
     ros__parameters:
-      update_frequency: 5.0        # INCREASED: faster updates
-      publish_frequency: 2.0       # INCREASED: for RViz
-      global_frame: map            # CHANGED: use map frame for localization
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: map
       robot_base_frame: base_link
       use_sim_time: False
-      rolling_window: false        # CHANGED: use full static map
-      resolution: 0.05             # 5cm resolution
+      rolling_window: true          # Follow robot, no static map
+      width: 20                     # 20m rolling window for planning
+      height: 20
+      resolution: 0.05
       robot_radius: 0.25
-      track_unknown_space: true    # Track unknown space
-      transform_tolerance: 1.0     # Added: for TF timing
-      plugins: ["static_layer", "voxel_layer", "inflation_layer"]
+      track_unknown_space: false    # No map = all is free space initially
+      transform_tolerance: 1.0
+      plugins: ["voxel_layer", "inflation_layer"]
       
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"

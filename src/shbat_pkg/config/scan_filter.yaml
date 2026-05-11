@@ -1,13 +1,12 @@
 ### Laser Scan Filter Configuration
 ### 
-### Filters out specific angle ranges where robot frame beams are detected.
-### Angles are measured counter-clockwise from front of robot:
-###   Front = 0°
-###   Left = 90°
-###   Back = ±180°
-###   Right = -90° (or 270°)
+### RPLIDAR S2: upside-down, forward 7cm from base_link.
+### lidar_link TF: rpy="3.14 0 3.14" (roll=π fixes mirror, yaw=π fixes front/back).
+### 
+### Lidar frame angle mapping after TF:
+###   0° = robot rear, 90° = robot left, ±180° = robot front, -90° = robot right
 ###
-### Adjust the filter_zones based on your robot's beam positions!
+### 180° front-only FOV: blocks rear half [-90°, 90°]
 
 scan_filter:
   ros__parameters:
@@ -19,14 +18,5 @@ scan_filter:
     min_range: 0.10      # 10cm - ignore very close readings (robot body + noise)
     max_range: 8.0       # 8m - reduced from 12m, far readings are noisy
     
-    # Intensity filter (if your LIDAR supports it)
-    # min_intensity: 100  # Ignore weak reflections
-    
-    # Filter zones as flat list: [start1, end1, start2, end2, ...]
-    # Each pair is [start_angle_deg, end_angle_deg]
-    # Readings in these zones will be set to infinity (ignored)
-    # 
-    # For 2040 beams on left and right of LIDAR:
-    # Left beam: 80 to 100 degrees
-    # Right beam: -100 to -80 degrees (or 260 to 280)
-    filter_zones: [80.0, 100.0, -100.0, -80.0]
+    # Filter zones: block rear 180° (-90° to 90°) to see front half only
+    filter_zones: [-90.0, 90.0]

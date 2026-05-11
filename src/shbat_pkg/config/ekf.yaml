@@ -2,7 +2,7 @@
 ### 
 ### Sensors:
 ### 1. /wheel_odom - wheel encoder odometry (from base_controller)
-### 2. /imu - external IMU (Wheeltec N100)
+### 2. /imu - external IMU (HWT901B via WITMotion protocol)
 ###
 ### Output: /odometry/filtered
 ### TF: odom -> base_link
@@ -61,7 +61,7 @@ ekf_filter_node:
 
     # -------------------------------------------------------------------
     # Sensor 1: IMU (orientation + angular velocity)
-    # Topic: /imu (Wheeltec N100)
+    # Topic: /imu (HWT901B WITMotion)
     #
     # IMU provides:
     # - Yaw angular velocity (gyroscope) - most reliable from IMU

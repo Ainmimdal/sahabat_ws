@@ -306,7 +306,7 @@ class BaseController(Node):
         self.vx = (v_right + v_left) / 2.0
         self.vth = (v_right - v_left) / self.wheel_base
 
-        # Integrate position using midpoint method for better accuracy
+        # Integrate position
         delta_th = self.vth * dt
         delta_x = self.vx * math.cos(self.th + delta_th / 2.0) * dt
         delta_y = self.vx * math.sin(self.th + delta_th / 2.0) * dt

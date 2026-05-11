@@ -124,11 +124,29 @@ class Joy2CmdNode(Node):
         
         twist = Twist()
 
-        # Axis mapping (adjust if needed)
-        # axis 1: forward/backward (usually left stick vertical)
-        # axis 2: left/right (usually left stick horizontal)
-        linear_input = msg.axes[1] if len(msg.axes) > 1 else 0.0
-        angular_input = msg.axes[2] if len(msg.axes) > 2 else 0.0
+        # Axis mapping for Xbox 360 controller:
+        # axis 0: left stick X (steering/rotation)
+        # axis 1: left stick Y (forward/backward)
+        # axis 2: LT trigger (1.0 released, -1.0 pressed) — NOT used
+        # axis 3: right stick X
+        # axis 4: right stick Y
+        # axis 5: RT trigger (1.0 released, -1.0 pressed) — NOT used
+        
+        linear_input = 0.0
+        angular_input = 0.0
+        
+        if len(msg.axes) > 1:
+            linear_input = msg.axes[1]  # Left stick Y
+        
+        if len(msg.axes) > 0:
+            angular_input = msg.axes[0]  # Xbox left/right
+        
+        # Deadzone: ignore small inputs to prevent drift
+        deadzone = 0.08
+        if abs(linear_input) < deadzone:
+            linear_input = 0.0
+        if abs(angular_input) < deadzone:
+            angular_input = 0.0
 
         # Only allow movement if dead man switch is held (optional safety)
         # Comment out these lines if you don't want dead man switch
