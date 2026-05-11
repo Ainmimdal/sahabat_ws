@@ -1,6 +1,6 @@
 # Sahabat Robot - Project Status
 
-**Last Updated:** February 9, 2026
+**Last Updated:** May 12, 2026
 
 ## ✅ Current Working Setup
 
@@ -8,16 +8,18 @@
 
 | Component | Model | Connection | Port | Baudrate | Status |
 |-----------|-------|------------|------|----------|--------|
-| Motor Controller | ZLAC8015D | RS485/FTDI | `/dev/motor` → ttyUSB0 | 115200 | ✅ Working |
-| LIDAR | Oradar MS200 | FTDI | `/dev/lidar` → ttyUSB1 | 230400 | ✅ Working (10 Hz) |
-| IMU | Wheeltec N100 | CP2102 | `/dev/imu` → ttyUSB2 | 921600 | ✅ Working |
+| Motor Controller | ZLAC8015D | RS485/FTDI | `/dev/motor` → ttyUSBx | 115200 | ✅ Working |
+| LIDAR | RPLIDAR S2 | FTDI (custom) | `/dev/ttyUSBx` (auto-probed) | 1,000,000 | ✅ Working (10 Hz, DenseBoost) |
+| IMU | HWT901B (WITMotion) | CH340/CP2102 | `/dev/ttyUSBx` (auto-probed) | 115200 | ✅ Working (USB power-dependent) |
 | Camera | ZED 2i | USB 3.0 | Direct | - | ✅ Working |
 
 **Important Notes:**
-- IMU must be connected **directly to USB port** (not through hub) - 921600 baud is sensitive to signal quality
-- Udev rules installed at `/etc/udev/rules.d/99-sahabat-robot.rules` for consistent device naming
-- LIDAR runs at 10 Hz (motor_speed: 10)
-- **Angular velocity limited to 0.5 rad/s** to prevent scan mismatch during rotation (10Hz LIDAR sync)
+- **RPLIDAR S2**: Mounted upside-down, 7cm forward of wheel axle. Connected via custom FTDI adapter (original USB cable broken). Needs **direct USB port** (not through hub) for adequate motor power. DenseBoost scan mode at 10 Hz / 32 KHz.
+- **HWT901B IMU**: CH340 USB-to-UART adapter. CH341 kernel module conflicts on Jetson — CP2102 adapter recommended if issues persist. Outputs WITMotion protocol at 115200 baud.
+- **Smart device detection**: All sensors auto-probed at launch — RPLIDAR by scan data at 1Mbaud, HWT901B by continuous data stream, BNO055 by chip ID query, Motor by known FTDI serial (A50285BI). No fixed port assignments needed.
+- **Xbox 360 Controller**: Requires `xpad` kernel module (compiled from source for Jetson kernel). Wireless adapter supported.
+- Udev rules at `udev/99-sahabat-robot.rules` (must be installed to `/etc/udev/rules.d/`).
+- **Angular velocity limited to 0.5 rad/s** to prevent scan mismatch during rotation (10Hz LIDAR sync).
 
 ### Robot Physical Specs
 
@@ -28,18 +30,25 @@
 | Wheel Base | 0.33m (center to center) |
 | Robot Radius | ~0.25m |
 | Drive Type | Differential drive |
+| LIDAR Mount | 7cm forward of wheel axle, 25cm above body_link |
 | ZED Mount | 5cm forward, 70cm from floor |
+
+### URDF Notes
+- `lidar_link`: positioned at `xyz="0.22 0 0.25"` from body_link (net +0.07m from base_link)
+- `lidar_joint`: rotated `rpy="3.14 0 3.14"` — roll=π fixes upside-down mirroring, yaw=π fixes front/back orientation
+- Right motor: mechanically inverted (set_velocity() handles the `-` sign)
+- Odometry direction: matched to physical robot motion after motor polarity fix
 
 ### Software Stack
 
 | Component | Package/Node | Status |
 |-----------|--------------|--------|
 | Motor Driver | `shbat_pkg/base_controller` | ✅ Working |
-| LIDAR Driver | `oradar_lidar/oradar_scan` | ✅ Working |
-| Scan Filter | `shbat_pkg/scan_filter` | ✅ Working (filters beam readings + noise) |
-| IMU Driver | `wheeltec_n100_imu/imu_node` | ✅ Working |
+| LIDAR Driver | `rplidar_ros/rplidar_node` | ✅ Working (DenseBoost, 10 Hz) |
+| Scan Filter | `shbat_pkg/scan_filter` | ✅ Working (180° front-only FOV) |
+| IMU Driver | `witmotion_ros2/witmotion_ros2` | ✅ Working (CH340 USB-dependent) |
 | EKF Fusion | `robot_localization/ekf_node` | ✅ Working |
-| Nav2 Stack | Full navigation stack | ✅ Working |
+| Nav2 Stack | Full navigation stack | ✅ Working (odom-only mode) |
 | SLAM Toolbox | 2D LIDAR SLAM (mapping) | ✅ Working |
 | AMCL | Localization with saved map | ✅ Working |
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
@@ -50,15 +59,14 @@
 
 ## 🚀 Working Features
 
-### 1. Basic Navigation (Nav2)
+### 1. Basic Navigation (Nav2 — Odom-Only)
 - **Launch:** `ros2 launch shbat_pkg nav2_test_launch.py`
-- Path planning with A* planner
-- Regulated Pure Pursuit controller
-- Local/global costmaps with obstacle avoidance
+- Global costmap: rolling window (no map needed), voxel + inflation layers
+- Path planning with A* planner through free space + LIDAR obstacles
 - Goal pose via RViz "2D Goal Pose" button
 
 ### 2. Joystick Control
-- Left stick: Forward/backward + rotation
+- Left stick: Forward/backward + rotation (Xbox 360 mapping)
 - **Emergency Stop:** Button A (stops robot immediately)
 - **Resume:** Button B (clears emergency stop)
 
@@ -68,89 +76,48 @@
 - Config: `config/ekf.yaml`
 
 ### 4. LIDAR Filtering
-- Filters out structural beam readings (2040 aluminum extrusions)
 - Input: `/scan_raw` → Output: `/scan`
+- RPLIDAR S2 mounted upside-down + backward: TF `rpy="3.14 0 3.14"` corrects orientation
+- 180° front-only FOV: filters rear half `[-90°, 90°]` where robot body/beams are
 - Config: `config/scan_filter.yaml`
 
-### 5. Udev Rules
-- Automatic device naming regardless of plug order
-- `/dev/motor`, `/dev/lidar`, `/dev/imu` symlinks
+### 5. Smart Device Detection
+- Protocol-based probing at launch — no fixed USB port numbers
+- RPLIDAR S2: scan data at 1,000,000 baud
+- HWT901B: continuous WITMotion data stream (0x55 headers)
+- BNO055 fallback: UART chip ID query (0xAA 0x01 command)
+- Motor: known FTDI serial (A50285BI) or Modbus probe
+- Auto-disables sensors not detected
 
 ### 6. SLAM Toolbox (2D Mapping)
 - **Launch:** `ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping`
 - Lightweight 2D SLAM using LIDAR only
-- RViz panel for interactive control (save/load maps, pause, localize)
-- Noise reduction tuned (scan buffering, minimum score filtering)
 - Config: `config/slam_toolbox.yaml`
 
 ### 7. Waypoint Manager (GUI)
 - **Launch:** `ros2 run shbat_pkg waypoint_manager`
 - All-in-one tkinter GUI for waypoint collection and patrol
-- Add waypoints by clicking in RViz (2D Goal Pose or Publish Point)
-- Add current robot pose as waypoint with button
-- Reorder waypoints (up/down), rename, delete
-- Navigate to single waypoint or patrol all
-- Previous/Next waypoint buttons
-- Loop or single-run mode
-- Save/load waypoints to YAML file
-- Waypoints visualized in RViz as colored markers with direction arrows
 - Config: `config/patrol_waypoints.yaml`
 
 ### 8. AMCL Localization
 - Used in localization mode (with saved map)
-- Supports 2D Pose Estimate in RViz for re-localization
-- **Global localization** - spreads particles across entire map on startup
-- **Auto pose restore** - saves 2D Pose Estimate and restores on next launch
+- Global localization + auto pose restore
 - Config: `config/amcl.yaml`
 
 ### 9. API Bridge (LLM/Pi Integration)
-- REST API server for external control (e.g., Raspberry Pi with LLM)
+- REST API server for external control
 - **Launch:** `ros2 run shbat_pkg api_bridge`
-- Default port: 5000 (configurable via `API_PORT` env var)
-- Listens on all interfaces (0.0.0.0) for network access
-- Endpoints:
-  - `GET /status` - Battery, position, navigation state, stuck detection
-  - `POST /navigate` - Navigate to pose `{"x": 1.0, "y": 2.0, "yaw": 0.0}`
-  - `POST /waypoints` - Set waypoint list
-  - `POST /patrol/start` - Start waypoint patrol
-  - `POST /patrol/stop` - Stop patrol
-  - `POST /cancel` - Cancel current navigation
-  - `POST /emergency_stop` - Emergency stop
-- Pi client library: `scripts/robot_client.py`
-- Includes LLM tool definitions for function calling
+- Default port: 5000
 
 ### 10. Foxglove Bridge (Remote Visualization)
 - **Enabled via:** `use_foxglove:=true` launch argument
 - Default port: 8765
-- Connect from laptop using Foxglove Studio
-- **Install:** `sudo apt install ros-humble-foxglove-bridge`
-- Perfect for mapping in the field without monitor
 
 ### 11. ZED 3D Obstacle Detection (VoxelLayer + PointCloud2)
 - **Enabled via:** `use_zed:=true` launch argument
-- Uses ZED PointCloud2 directly in costmap VoxelLayer
-- **Detects obstacles from 5cm to 100cm height** (catches low and tall obstacles)
-- Much better than previous depth_to_laserscan (single horizontal slice)
-- ZED pointcloud added to both local and global costmaps
-- PointCloud visualization available in RViz (disabled by default)
 
 ### 12. Localization + Patrol Launch (Production Ready)
 - **Launch:** `ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/path/to/map`
-- One-command launch for tour guide operation
-- Includes: Localization, Nav2, Waypoint Manager GUI
-- Optional: ZED obstacle detection, API Bridge, Foxglove
-- **Auto pose saver** - remembers 2D Pose Estimate for next boot
-
-### 13. Auto Pose Saver (NEW)
-- Runs automatically in localization mode
-- When you use **2D Pose Estimate** in RViz, it saves the pose to `~/.ros/sahabat_saved_pose.yaml`
-- On next launch, **automatically publishes saved pose to AMCL** (3 second delay)
-- No manual coordinate copying needed!
-
-### 14. Save Current Pose Script
-- **Launch:** `ros2 run shbat_pkg save_current_pose`
-- Saves robot's current position to `~/.ros/sahabat_home_pose.yaml`
-- Prints launch command with exact coordinates for next startup
 
 ---
 
@@ -158,15 +125,15 @@
 
 | File | Purpose |
 |------|---------|
-| `config/nav2_odom_only.yaml` | Nav2 parameters (planner, controller, costmaps) |
+| `config/nav2_odom_only.yaml` | Nav2 parameters (planner, controller, rolling costmaps) |
 | `config/ekf.yaml` | EKF sensor fusion settings |
-| `config/scan_filter.yaml` | LIDAR angle filtering + noise reduction |
+| `config/scan_filter.yaml` | LIDAR angle filtering (180° front-only FOV) |
 | `config/slam_toolbox.yaml` | SLAM mapping parameters |
 | `config/amcl.yaml` | AMCL localization parameters |
 | `config/patrol_waypoints.yaml` | Waypoint patrol locations |
-| `urdf/sahabat_robot.urdf.xacro` | Robot model (175mm wheels) |
+| `urdf/sahabat_robot.urdf.xacro` | Robot model (RPLIDAR at +7cm, lidar_joint rpy=3.14 0 3.14) |
 | `rviz/slam_nav.rviz` | RViz config with waypoint markers + PointCloud |
-| `/etc/udev/rules.d/99-sahabat-robot.rules` | USB device symlinks |
+| `udev/99-sahabat-robot.rules` | USB device symlinks |
 
 ---
 
@@ -176,9 +143,8 @@
 |-------------|---------|
 | `localization_patrol_launch.py` | **Production** - Localization + Nav2 + Waypoint GUI |
 | `slam_nav_launch.py` | SLAM + Nav2 (mapping or localization mode) |
-| `nav2_test_launch.py` | Nav2 navigation testing (odom-only) |
+| `nav2_test_launch.py` | Nav2 navigation testing (odom-only, rolling global costmap) |
 | `sahabat_launch.py` | Basic robot bringup (no Nav2) |
-
 
 ---
 
@@ -189,15 +155,17 @@
 cd ~/sahabat_ws
 source install/setup.bash
 
-# === PRODUCTION: LOCALIZATION + PATROL (RECOMMENDED FOR TOUR GUIDE) ===
-# Basic - with saved map and waypoint GUI
+# === NAV2 ODOM-ONLY (no map needed) ===
+ros2 launch shbat_pkg nav2_test_launch.py
+
+# === BASIC BRINGUP (joystick only) ===
+ros2 launch shbat_pkg sahabat_launch.py
+
+# === PRODUCTION: LOCALIZATION + PATROL ===
 ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/gallery
 
-# With ZED obstacle detection (recommended)
+# With ZED obstacle detection
 ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/gallery use_zed:=true
-
-# With API Bridge for external control (Pi/LLM)
-ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/gallery use_zed:=true use_api:=true
 
 # Full production with known start position
 ros2 launch shbat_pkg localization_patrol_launch.py \
@@ -211,80 +179,47 @@ ros2 launch shbat_pkg localization_patrol_launch.py \
 # === SLAM MAPPING (create new map) ===
 ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping
 
-# Save map after mapping (creates .pgm + .yaml for AMCL)
+# Save map after mapping
 ros2 run nav2_map_server map_saver_cli -f /home/sahabat/maps/my_map
 
 # === SLAM LOCALIZATION (use existing map) ===
-# Note: map_file should NOT include .yaml extension
 ros2 launch shbat_pkg slam_nav_launch.py mode:=localization map_file:=/home/sahabat/maps/my_map
-
-# With ZED obstacle detection
-ros2 launch shbat_pkg slam_nav_launch.py mode:=localization map_file:=/path/to/map use_zed:=true
 
 # === WAYPOINT MANAGER (GUI) ===
 ros2 run shbat_pkg waypoint_manager
 
-# === SAVE CURRENT POSE (for auto-localization) ===
+# === SAVE CURRENT POSE ===
 ros2 run shbat_pkg save_current_pose
-
-# === NAV2 ONLY (no SLAM) ===
-ros2 launch shbat_pkg nav2_test_launch.py
 
 # === EMERGENCY STOP ===
 ros2 topic pub /emergency_stop std_msgs/msg/Bool "{data: true}" --once
-
-# Clear emergency stop
 ros2 topic pub /emergency_stop std_msgs/msg/Bool "{data: false}" --once
 
 # === DIAGNOSTICS ===
-ros2 topic echo /odom --once          # Check odometry
-ros2 topic echo /imu --once           # Check IMU
-ros2 topic echo /scan --once          # Check LIDAR
-ros2 topic hz /scan                   # Check LIDAR rate (should be ~10 Hz)
-ros2 run tf2_tools view_frames        # Check TF tree
+ros2 topic echo /odom --once
+ros2 topic echo /imu --once
+ros2 topic echo /scan --once
+ros2 topic hz /scan
+ros2 run tf2_tools view_frames
 
-# === CPU/GPU MONITORING ===
-htop                                  # CPU usage
-jtop                                  # Jetson stats (CPU/GPU/RAM)
-nvidia-smi                            # GPU usage
-
-# === API BRIDGE (for Pi/LLM) ===
-ros2 run shbat_pkg api_bridge         # Start REST API on port 5000
-# Or with custom port:
-API_PORT=8080 ros2 run shbat_pkg api_bridge
-
-# === FOXGLOVE (remote visualization from laptop) ===
-# First install: sudo apt install ros-humble-foxglove-bridge
-ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping use_foxglove:=true use_rviz:=false
-# Then connect Foxglove Studio to ws://ROBOT_IP:8765
+# === XBOX CONTROLLER ===
+# Load xpad kernel module (compiled from source)
+sudo insmod /tmp/xpad/xpad.ko
+ls /dev/input/js*
 ```
-
-### Map Saving Notes
-
-| Method | Files Created | Can Load With |
-|--------|---------------|---------------|
-| `map_saver_cli` (recommended) | `.pgm` + `.yaml` | AMCL, map_server |
-| slam_toolbox RViz "Save Map" | `.posegraph` + `.data` | slam_toolbox only |
-
-**Always use `map_saver_cli` to save maps** - this creates the standard format that works with AMCL for localization.
 
 ---
 
 ## 🎯 Next Steps / TODO
 
-- [x] ~~Tune Nav2 parameters for smoother navigation~~
-- [x] ~~Add SLAM (using slam_toolbox - lightweight alternative to RTAB-Map)~~
-- [x] ~~Implement waypoint patrol~~
-- [x] ~~Add Waypoint Manager GUI with visualization~~
-- [x] ~~Add AMCL for localization mode (supports 2D Pose Estimate)~~
-- [x] ~~Add API Bridge for LLM/Pi integration~~
-- [x] ~~Add ZED camera for obstacle detection~~ (VoxelLayer + PointCloud2)
-- [x] ~~Auto-localization without manual 2D Pose Estimate~~
-- [x] ~~Save current pose script for repeatable startup~~
-- [x] ~~Production launch file for tour guide operation~~
-- [x] ~~Reduce angular velocity for 10Hz LIDAR sync~~
-- [x] ~~Auto pose saver - remembers 2D Pose Estimate for next boot~~
-- [x] ~~Goal tolerance tuning - 20cm position, 11° orientation~~
+- [x] ~~Hardware swap: RPLIDAR S2 + HWT901B IMU~~
+- [x] ~~Smart probe-based device detection~~
+- [x] ~~Fix RPLIDAR orientation (upside-down + backward mounting)~~
+- [x] ~~Fix motor polarity and odometry direction~~
+- [x] ~~Fix Nav2 global costmap for odom-only mode (rolling window)~~
+- [x] ~~Fix Xbox 360 joystick mapping~~
+- [ ] Make xpad kernel module persistent across reboots
+- [ ] Fix HWT901B CH340 port lock after shutdown
 - [ ] Add voice/audio feedback for tour guide functionality
 - [ ] Test full patrol workflow in production environment
 - [ ] Remote visualization solution for gallery deployment (Foxglove/VNC)
@@ -295,41 +230,29 @@ ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping use_foxglove:=true use_rv
 
 ## 🐛 Known Issues & Solutions
 
+### RPLIDAR Internal Error (Health Status 2)
+**Symptom:** `RPLidar internal error detected` on startup
+**Solution:** RPLIDAR needs sufficient USB power — plug directly into Jetson USB port (not through hub). May need power cycle (unplug/replug) between runs.
+
+### HWT901B IMU Port Lock After Shutdown
+**Symptom:** `Failed to open the serial port: Input/output error` on relaunch
+**Solution:** CH340 driver on Jetson sometimes locks the port. Unplug/replug the HWT901B USB adapter. Alternatively, use a CP2102 adapter.
+
 ### Scan Mismatch During Rotation
 **Symptom:** LIDAR scan doesn't match walls when robot rotates
-**Solution:** Angular velocity limited to 0.5 rad/s (~28°/s) for 10Hz LIDAR sync. At this speed, only 5° rotation per scan.
+**Solution:** Angular velocity limited to 0.5 rad/s (~28°/s).
 
 ### Map Orientation Wrong on Boot
 **Symptom:** Map appears rotated 90° from laser scan on startup
-**Solution:** Use 2D Pose Estimate in RViz to set correct position. The `pose_saver_auto` node will save it and restore on next boot.
+**Solution:** Use 2D Pose Estimate in RViz to set correct position. `pose_saver_auto` saves and restores on next boot.
 
-### Robot Oscillates at Goal
-**Symptom:** Robot keeps retrying when close to waypoint
-**Solution:** Goal checker uses `stateful: True` with 20cm tolerance - once reached, stays "reached".
+### Robot Doesn't Move to Goal Pose
+**Symptom:** Nav2 receives goal but robot doesn't move
+**Solution:** Check TF tree (`ros2 run tf2_tools view_frames`). EKF must publish `odom → base_link`. Check IMU is running.
 
-### IMU Won't Open
-**Symptom:** `Unable to open serial port /dev/imu`
-**Solution:** Connect IMU directly to USB port (not through hub) - 921600 baud is sensitive
-
-### Robot Doesn't Stop at Goal
-**Symptom:** Robot overshoots goal position
-**Solution:** Check EKF is publishing `/odom`, verify TF tree is complete
-
-### LIDAR Shows False Obstacles
-**Symptom:** Beams (2040 extrusions) detected as obstacles
-**Solution:** scan_filter node filters these angles - adjust `config/scan_filter.yaml`
-
-### Ghost Obstacles in SLAM Map
-**Symptom:** Black dots appear in map where nothing exists
-**Solutions:**
-- Increased `min_range: 0.15` in scan_filter.yaml (filters close noise)
-- Reduced `max_range: 8.0` (far readings are noisy)
-- Added `scan_buffer_size: 5` in slam_toolbox.yaml (averages scans)
-- Added `minimum_score: 0.5` (rejects poor scan matches)
-
-### RTAB-Map Lags on Orin Nano
-**Symptom:** System becomes unresponsive with RTAB-Map
-**Solution:** Use slam_toolbox instead (2D LIDAR-only, much lighter on CPU)
+### IMU Driver Not Detected
+**Symptom:** witmotion_ros2 node exits with serial error
+**Solution:** The probe may have locked the CH340 port. Replug IMU and relaunch. CH340 is auto-assigned to IMU without probing.
 
 ---
 
@@ -340,9 +263,9 @@ ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping use_foxglove:=true use_rv
 | `/cmd_vel` | Twist | Nav2/Joystick | Velocity commands |
 | `/odom` | Odometry | EKF | Filtered odometry |
 | `/wheel_odom` | Odometry | base_controller | Raw wheel odometry |
-| `/imu` | Imu | imu_node | IMU data |
+| `/imu` | Imu | witmotion_node | IMU data (remapped from /witmotion/imu) |
 | `/scan` | LaserScan | scan_filter | Filtered LIDAR |
-| `/scan_raw` | LaserScan | oradar_scan | Raw LIDAR |
+| `/scan_raw` | LaserScan | rplidar_node | Raw LIDAR (remapped from /scan) |
 | `/zed/zed_node/point_cloud/cloud_registered` | PointCloud2 | ZED | 3D point cloud for obstacle detection |
 | `/emergency_stop` | Bool | joy2cmd | Emergency stop trigger |
 | `/waypoint_markers` | MarkerArray | waypoint_manager | Waypoint visualization |
@@ -360,7 +283,7 @@ map
       └── base_link (from EKF)
            ├── base_footprint
            ├── body_link
-           │    ├── lidar_link
+           │    ├── lidar_link (rpy=3.14 0 3.14, 7cm forward of axle)
            │    ├── front_caster_wheel_link
            │    └── rear_caster_wheel_link
            ├── left_wheel_link
