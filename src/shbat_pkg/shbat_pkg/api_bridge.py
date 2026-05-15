@@ -114,6 +114,7 @@ class APIBridgeNode(Node):
         # Publishers
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         self.status_pub = self.create_publisher(String, '/robot_status', 10)
+        self.exhibit_cmd_pub = self.create_publisher(String, '/exhibit_command', 10)
         
         # Subscribers
         self.odom_sub = self.create_subscription(
@@ -383,6 +384,18 @@ class APIBridgeNode(Node):
         self.status.nav_state = NavState.IDLE.value
         self.get_logger().warn('EMERGENCY STOP executed')
     
+    def send_exhibit_command(self, action: str, exhibit: str = None, exhibits: list = None):
+        """Send a command to the exhibit navigator via /exhibit_command topic"""
+        cmd = {'action': action}
+        if exhibit:
+            cmd['exhibit'] = exhibit
+        if exhibits:
+            cmd['exhibits'] = exhibits
+        msg = String()
+        msg.data = json.dumps(cmd)
+        self.exhibit_cmd_pub.publish(msg)
+        self.get_logger().info(f'Exhibit command: {cmd}')
+    
     def get_status(self) -> Dict[str, Any]:
         """Get current robot status"""
         return self.status.to_dict()
@@ -426,6 +439,29 @@ def create_flask_app() -> Flask:
         
         success = ros_node.navigate_to_pose(float(x), float(y), float(yaw))
         return jsonify({'success': success, 'message': ros_node.status.error_message or 'Navigation started'})
+    
+    @app.route('/exhibit/goto', methods=['POST'])
+    def exhibit_goto():
+        """Forward exhibit command to exhibit navigator
+        
+        Body: {"exhibit": "exhibit_a"}
+        """
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data provided'}), 400
+        
+        exhibit = data.get('exhibit')
+        action = data.get('action', 'goto')
+        exhibits = data.get('exhibits')
+        
+        if action in ('goto', 'stop', 'pause', 'resume', 'start_tour', 'list_exhibits'):
+            ros_node.send_exhibit_command(action, exhibit=exhibit, exhibits=exhibits)
+            return jsonify({'success': True, 'action': action, 'exhibit': exhibit})
+        
+        return jsonify({'error': f'Unknown action: {action}'}), 400
     
     @app.route('/waypoints', methods=['GET'])
     def get_waypoints():

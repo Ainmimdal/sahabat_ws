@@ -97,12 +97,37 @@
 ### 7. Waypoint Manager (GUI)
 - **Launch:** `ros2 run shbat_pkg waypoint_manager`
 - All-in-one tkinter GUI for waypoint collection and patrol
-- Config: `config/patrol_waypoints.yaml`
+- **Save Waypoints** — saves to `patrol_waypoints.yaml`
+- **Save as Exhibits** — exports waypoints to `exhibit_routes.yaml` for Pi/LLM navigation
+  - Use **Rename** button to set meaningful names (e.g., `station_1`, `entrance`) before exporting
+  - Preserves existing routes and settings in the exhibit config
+- Config: `config/patrol_waypoints.yaml`, `config/exhibit_routes.yaml`
 
-### 8. AMCL Localization
-- Used in localization mode (with saved map)
-- Global localization + auto pose restore
-- Config: `config/amcl.yaml`
+### 8. Exhibit Navigator + Pi/LLM Integration
+- **Launch:** `ros2 run shbat_pkg exhibit_navigator`
+- Headless node for route-based navigation controlled by external systems
+- Listens on `/exhibit_command` topic for commands
+- Publishes events to `/robot_events` and `/exhibit_arrival`
+- API Bridge exposes `POST /exhibit/goto` HTTP endpoint on port 5000
+- Pi sends: `{"exhibit": "station_1"}` → robot navigates to that exhibit
+- Supports tour mode, pause/resume, obstruction detection
+- Config: `config/exhibit_routes.yaml`
+
+### 9. API Bridge (LLM/Pi Integration)
+- REST API server for external control
+- **Launch:** `ros2 run shbat_pkg api_bridge` or `use_api:=true` in launch
+- Default port: 5000
+- Endpoints:
+  - `POST /exhibit/goto` — Navigate to exhibit `{"exhibit": "station_1"}`
+  - `POST /navigate` — Navigate to pose `{"x": 1.0, "y": 2.0, "yaw": 0.0}`
+  - `POST /emergency_stop` — Emergency stop
+  - `POST /cancel` — Cancel current navigation
+  - `GET /status` — Robot status
+
+### 10. Auto-Reconnect RPLIDAR
+- Probe does DTR power cycle (1s off, 1s on) + STOP/RESET before each launch
+- `respawn=True, respawn_delay=3.0` on rplidar_node — auto-retries on health status 2
+- LIDAR recovers without manual replug in most cases
 
 ### 9. API Bridge (LLM/Pi Integration)
 - REST API server for external control
@@ -131,6 +156,7 @@
 | `config/slam_toolbox.yaml` | SLAM mapping parameters |
 | `config/amcl.yaml` | AMCL localization parameters |
 | `config/patrol_waypoints.yaml` | Waypoint patrol locations |
+| `config/exhibit_routes.yaml` | Exhibit coordinates + routes for Pi/LLM navigation |
 | `urdf/sahabat_robot.urdf.xacro` | Robot model (RPLIDAR at +7cm, lidar_joint rpy=3.14 0 3.14) |
 | `rviz/slam_nav.rviz` | RViz config with waypoint markers + PointCloud |
 | `udev/99-sahabat-robot.rules` | USB device symlinks |

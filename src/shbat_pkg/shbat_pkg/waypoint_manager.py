@@ -400,6 +400,54 @@ class WaypointManager(Node):
         except Exception as e:
             return False, str(e)
 
+    def save_as_exhibits(self, exhibit_file):
+        """Export waypoints as exhibits for exhibit navigator"""
+        if not self.waypoints:
+            return False, "No waypoints to export"
+        
+        try:
+            existing = {'routes': {}, 'default_tour': [], 'settings': {}}
+            if os.path.exists(exhibit_file):
+                with open(exhibit_file, 'r') as f:
+                    data = yaml.safe_load(f)
+                    if data:
+                        existing = data
+            
+            exhibits = {}
+            for i, wp in enumerate(self.waypoints):
+                raw_name = wp.get('name', f'Waypoint {i+1}')
+                safe_name = raw_name.lower().replace(' ', '_').replace('-', '_').replace('.', '_')
+                exhibits[safe_name] = {
+                    'x': round(wp['x'], 3),
+                    'y': round(wp['y'], 3),
+                    'yaw': round(wp['yaw'], 3),
+                    'description': raw_name
+                }
+            
+            output = {
+                'exhibits': exhibits,
+                'routes': existing.get('routes', {}),
+                'default_tour': existing.get('default_tour', []),
+                'settings': existing.get('settings', {
+                    'wait_at_exhibit': 5.0,
+                    'announce_arrival': True,
+                    'allow_direct_navigation': True,
+                    'battery_low_threshold': 30.0,
+                    'battery_critical_threshold': 15.0,
+                    'obstruction_timeout': 10.0
+                })
+            }
+            
+            os.makedirs(os.path.dirname(exhibit_file), exist_ok=True)
+            with open(exhibit_file, 'w') as f:
+                f.write("# Exhibit Routes Configuration\n")
+                f.write("# Generated from Waypoint Manager\n\n")
+                yaml.dump(output, f, default_flow_style=False, sort_keys=False)
+            
+            return True, f"Saved {len(exhibits)} exhibits to exhibit_routes.yaml"
+        except Exception as e:
+            return False, str(e)
+
     def load_waypoints(self):
         """Load waypoints from file"""
         try:
@@ -568,6 +616,8 @@ class WaypointManagerGUI:
                    command=self.save_waypoints).pack(side='left', padx=5)
         ttk.Button(file_frame, text="Reload from File",
                    command=self.reload_waypoints).pack(side='left', padx=5)
+        ttk.Button(file_frame, text="Save as Exhibits",
+                   command=self.save_waypoints_as_exhibits).pack(side='left', padx=5)
         
         # ===== LOG =====
         log_frame = ttk.LabelFrame(main, text="Log", padding="5")
@@ -701,6 +751,18 @@ class WaypointManagerGUI:
             self.log(f"Loaded {len(self.node.waypoints)} waypoints")
         else:
             self.log("Could not load waypoints")
+    
+    def save_waypoints_as_exhibits(self):
+        """Save current waypoints as exhibits for exhibit navigator"""
+        exhibit_file = os.path.expanduser(
+            '~/sahabat_ws/src/shbat_pkg/config/exhibit_routes.yaml')
+        success, msg = self.node.save_as_exhibits(exhibit_file)
+        if success:
+            messagebox.showinfo("Export Successful", msg)
+            self.log(f"OK: {msg}")
+        else:
+            messagebox.showerror("Export Failed", msg)
+            self.log(f"ERR: {msg}")
     
     def run(self):
         self.root.mainloop()
