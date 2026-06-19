@@ -13,7 +13,7 @@
       }
     },
     "Log!rosout": { "searchTerms": [], "minLogLevel": 2 },
-    "Sahabat Operator!health": { "view": "health" }
+    "Sahabat Operator!health": {}
   },
   "globalVariables": {},
   "userNodes": {},

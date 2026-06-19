@@ -3,9 +3,7 @@ import { ros2humble as ros2 } from "@foxglove/rosmsg-msgs-common";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-type View = "drive" | "maps" | "routes" | "health";
 type InputMode = "keyboard" | "gamepad";
-type PanelState = { view?: View };
 type Status = {
   mode: number;
   active_map: string;
@@ -70,24 +68,12 @@ const blankStatus: Status = {
 };
 
 const modeNames = ["Idle", "Mapping", "Localization", "Operate"];
-const viewLabels: Record<View, string> = {
-  drive: "Drive",
-  maps: "Maps",
-  routes: "Routes",
-  health: "Health",
-};
 const teleopDatatypes = new Map([
   ["std_msgs/Header", ros2["std_msgs/Header"]],
   ["sensor_msgs/Joy", ros2["sensor_msgs/Joy"]],
 ]);
 
-function initialView(state: unknown): View {
-  const view = (state as PanelState | undefined)?.view;
-  return view != undefined && view in viewLabels ? view : "drive";
-}
-
 function OperatorPanel({ context }: { context: PanelExtensionContext }): React.JSX.Element {
-  const [view, setView] = useState<View>(() => initialView(context.initialState));
   const [status, setStatus] = useState<Status>(blankStatus);
   const [connected, setConnected] = useState(false);
   const [clientId] = useState(() => `foxglove-${crypto.randomUUID().slice(0, 8)}`);
@@ -99,6 +85,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const [controllerIndex, setControllerIndex] = useState(-1);
   const [deadzone, setDeadzone] = useState(0.12);
   const [invertY, setInvertY] = useState(true);
+  const [linearSpeed, setLinearSpeed] = useState(0.20);
+  const [angularSpeed, setAngularSpeed] = useState(0.60);
   const [maps, setMaps] = useState<MapInfo[]>([]);
   const [mapName, setMapName] = useState("");
   const [mapId, setMapId] = useState("");
@@ -111,11 +99,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const lastStatusAt = useRef(0);
   const leaseRef = useRef("");
   leaseRef.current = leaseId;
-
-  const selectView = (next: View) => {
-    setView(next);
-    context.saveState({ view: next });
-  };
 
   const call = useCallback(async <T,>(service: string, request: unknown): Promise<T> => {
     if (!context.callService) {
@@ -151,16 +134,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     publish(0, 0, false);
   }, [publish]);
 
-  const estop = useCallback(async () => {
-    stopTeleop();
-    const result = await call<{ message: string }>("/operator/set_emergency_stop", {
-      active: true,
-      lease_id: leaseRef.current,
-      confirmation: "operator E-stop",
-    });
-    setNotice(result.message);
-  }, [call, stopTeleop]);
-
   useEffect(() => {
     context.watch("currentFrame");
     context.subscribe([
@@ -186,7 +159,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
             dwell_seconds: 0,
             enabled: true,
           }]);
-          selectView("routes");
         }
       }
       done();
@@ -244,20 +216,23 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 
   const keyboardVelocity = useCallback(() => {
     const moving = ["KeyW", "KeyA", "KeyS", "KeyD"].some((key) => keys.current.has(key));
-    const active = moving && leaseRef.current !== "" && !status.emergency_stop;
+    const active = moving && leaseRef.current !== "";
     const linear = active
-      ? (Number(keys.current.has("KeyW")) - Number(keys.current.has("KeyS"))) * 0.20
+      ? (Number(keys.current.has("KeyW")) - Number(keys.current.has("KeyS"))) * linearSpeed
       : 0;
     const angular = active
-      ? (Number(keys.current.has("KeyA")) - Number(keys.current.has("KeyD"))) * 0.60
+      ? (Number(keys.current.has("KeyA")) - Number(keys.current.has("KeyD"))) * angularSpeed
       : 0;
     publish(linear, angular, active);
-  }, [publish, status.emergency_stop]);
+  }, [angularSpeed, linearSpeed, publish]);
 
   useEffect(() => {
-    if (inputMode !== "keyboard" || view !== "drive") return;
-    const editable = (target: EventTarget | null) => target instanceof HTMLElement
-      && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
+    if (inputMode !== "keyboard") return;
+    const editable = (target: EventTarget | null) => {
+      const element = target as { isContentEditable?: boolean; tagName?: string } | null;
+      return element?.isContentEditable === true
+        || ["INPUT", "TEXTAREA", "SELECT"].includes(element?.tagName ?? "");
+    };
     const down = (event: KeyboardEvent) => {
       if (editable(event.target) || !["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) return;
       event.preventDefault();
@@ -270,30 +245,38 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       keys.current.delete(event.code);
       keyboardVelocity();
     };
+    const targets: Window[] = [window];
+    try {
+      if (window.top != undefined && window.top !== window) targets.push(window.top);
+    } catch {
+      // Foxglove may isolate extension frames; the local target still works.
+    }
+    const uniqueTargets = [...new Set(targets)];
     const timer = window.setInterval(keyboardVelocity, 100);
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
+    for (const target of uniqueTargets) {
+      target.addEventListener("keydown", down, true);
+      target.addEventListener("keyup", up, true);
+    }
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
+      for (const target of uniqueTargets) {
+        target.removeEventListener("keydown", down, true);
+        target.removeEventListener("keyup", up, true);
+      }
       stopTeleop();
     };
-  }, [inputMode, keyboardVelocity, stopTeleop, view]);
+  }, [inputMode, keyboardVelocity, stopTeleop]);
 
   useEffect(() => {
-    const focusLost = () => stopTeleop();
     const visibility = () => { if (document.hidden) stopTeleop(); };
-    window.addEventListener("blur", focusLost);
     document.addEventListener("visibilitychange", visibility);
     return () => {
-      window.removeEventListener("blur", focusLost);
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [stopTeleop]);
 
   useEffect(() => {
-    if (inputMode !== "gamepad" || view !== "drive") return;
+    if (inputMode !== "gamepad") return;
     const timer = window.setInterval(() => {
       const found = [...navigator.getGamepads()].filter((pad): pad is Gamepad => pad != null);
       setControllers(found);
@@ -306,24 +289,18 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       const linearAxis = axis(pad.axes[1] ?? 0) * (invertY ? -1 : 1);
       const angularAxis = -axis(pad.axes[0] ?? 0);
       const active = Boolean(leaseRef.current)
-        && !status.emergency_stop
         && (linearAxis !== 0 || angularAxis !== 0);
-      publish(active ? linearAxis * 0.20 : 0, active ? angularAxis * 0.60 : 0, active);
+      publish(
+        active ? linearAxis * linearSpeed : 0,
+        active ? angularAxis * angularSpeed : 0,
+        active,
+      );
     }, 100);
     return () => {
       window.clearInterval(timer);
       stopTeleop();
     };
-  }, [controllerIndex, deadzone, inputMode, invertY, publish, status.emergency_stop, stopTeleop, view]);
-
-  const clearEstop = async () => {
-    const result = await call<{ message: string }>("/operator/set_emergency_stop", {
-      active: false,
-      lease_id: leaseRef.current,
-      confirmation: "CLEAR",
-    });
-    setNotice(result.message);
-  };
+  }, [angularSpeed, controllerIndex, deadzone, inputMode, invertY, linearSpeed, publish, stopTeleop]);
 
   const switchMode = async (mode: string, selectedMap = "") => {
     stopTeleop();
@@ -341,8 +318,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   }, [call]);
 
   useEffect(() => {
-    if (view === "maps" && connected) void run("Refreshing maps", refreshMaps);
-  }, [connected, refreshMaps, run, view]);
+    if (connected) void run("Refreshing maps", refreshMaps);
+  }, [connected, refreshMaps, run]);
 
   const saveMap = async () => {
     if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(mapId)) {
@@ -374,8 +351,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   }, [call, status.active_map]);
 
   useEffect(() => {
-    if (view === "routes" && status.active_map) void run("Loading routes", loadWaypoints);
-  }, [loadWaypoints, run, status.active_map, view]);
+    if (status.active_map) void run("Loading routes", loadWaypoints);
+  }, [loadWaypoints, run, status.active_map]);
 
   const saveWaypoints = async () => {
     const result = await call<{ revision: number; message: string }>(
@@ -454,7 +431,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     ["Localization", status.localization_healthy],
   ] as const, [status]);
   const hasLease = leaseId !== "";
-  const canMove = connected && hasLease && !status.emergency_stop;
+  const canMove = connected && hasLease;
   const recoveryActive = status.localization_recovery_active === true;
 
   return <div className="sahabat">
@@ -466,7 +443,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           {connected ? "Robot online" : "Disconnected"}
         </span>
       </div>
-      <button className="estop" onClick={() => void run("E-stop", estop)}>E-STOP</button>
     </header>
 
     <div className="summary">
@@ -486,18 +462,11 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       {!hasLease
         ? <button className="primary" disabled={!connected || busy !== ""} onClick={() => void run("Taking control", acquire)}>Take control</button>
         : <button onClick={() => void run("Releasing control", release)}>Release control</button>}
-      <button disabled={!hasLease || !status.emergency_stop || busy !== ""} onClick={() => void run("Clearing E-stop", clearEstop)}>Clear E-stop</button>
       <span>{status.active_operation || status.diagnostic_message}</span>
     </div>
 
-    <nav>{(Object.keys(viewLabels) as View[]).map((item) => (
-      <button className={view === item ? "active" : ""} onClick={() => selectView(item)} key={item}>
-        {viewLabels[item]}
-      </button>
-    ))}</nav>
-
     <main>
-      {view === "drive" && <section className="stack">
+      <section className="stack driveSection">
         {!status.localization_healthy && status.mode >= 2 && <div className="warning">
           <div><b>Localization needs attention</b><span>Check the lidar overlay, then run recovery if it does not match the map.</span></div>
           <button disabled={!canMove || recoveryActive} onClick={() => void run("Starting recovery", () => localizationRecovery(0))}>Recover</button>
@@ -518,14 +487,19 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           <label className="check"><input type="checkbox" checked={invertY} onChange={(event) => setInvertY(event.target.checked)}/> Invert forward axis</label>
         </div>}
 
+        <div className="form twoCol speedControls">
+          <label>Forward speed · {linearSpeed.toFixed(2)} m/s<input type="range" min="0.10" max="0.50" step="0.05" value={linearSpeed} onChange={(event) => setLinearSpeed(Number(event.target.value))}/></label>
+          <label>Turn speed · {angularSpeed.toFixed(2)} rad/s<input type="range" min="0.30" max="1.20" step="0.10" value={angularSpeed} onChange={(event) => setAngularSpeed(Number(event.target.value))}/></label>
+        </div>
+
         <div className={`command ${commanding ? "moving" : ""}`}>
-          <strong>{commanding ? "COMMANDING" : status.emergency_stop ? "E-STOPPED" : hasLease ? "READY" : "NO CONTROL"}</strong>
+          <strong>{commanding ? "COMMANDING" : hasLease ? "READY" : "NO CONTROL"}</strong>
           <span>{velocity.linear.toFixed(2)} m/s · {velocity.angular.toFixed(2)} rad/s</span>
         </div>
         <div className="pose">Pose <b>{status.pose.x.toFixed(2)}, {status.pose.y.toFixed(2)}</b> · yaw <b>{status.pose.theta.toFixed(2)}</b></div>
-      </section>}
+      </section>
 
-      {view === "maps" && <section className="stack">
+      <section className="stack mapsSection">
         <div className="sectionTitle"><div><h2>Mapping session</h2><p>Create a map, give it a useful name, then save it.</p></div><button disabled={!hasLease || status.mode === 1} onClick={() => void run("Starting mapping", () => switchMode("mapping"))}>Start mapping</button></div>
         <div className="form">
           <label>Map ID <small>Short filename: gallery_ground_floor</small><input value={mapId} placeholder="gallery_ground_floor" onChange={(event) => setMapId(event.target.value)}/></label>
@@ -542,9 +516,9 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           </article>
         ))}</div>
         <button className="quiet" disabled={!hasLease || status.mode === 0} onClick={() => void run("Stopping navigation", () => switchMode("idle"))}>Stop stack and return to idle</button>
-      </section>}
+      </section>
 
-      {view === "routes" && <section className="stack">
+      <section className="stack routesSection">
         <div className="sectionTitle"><div><h2>Routes · {status.active_map || "no map"}</h2><p>Click a pose in the 3D panel or capture the robot’s current pose.</p></div><button disabled={!status.active_map} onClick={() => void run("Loading routes", loadWaypoints)}>Reload</button></div>
         <div className="actions">
           <button disabled={!status.active_map} onClick={addCurrentPose}>Add current pose</button>
@@ -569,9 +543,9 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
             <div className="waypointActions"><button disabled={index === 0} onClick={() => moveWaypoint(index, -1)}>Up</button><button disabled={index === waypoints.length - 1} onClick={() => moveWaypoint(index, 1)}>Down</button><button disabled={!canMove || !point.enabled} onClick={() => void run("Navigating", () => patrol(0, point.id))}>Go</button><button className="dangerText" onClick={() => setWaypoints((all) => all.filter((_, itemIndex) => itemIndex !== index))}>Delete</button></div>
           </article>
         ))}</div>
-      </section>}
+      </section>
 
-      {view === "health" && <section className="stack">
+      <section className="stack healthSection">
         <div className="healthGrid">{healthItems.map(([label, healthy]) => <div className={healthy ? "healthy" : "unhealthy"} key={label}><small>{label}</small><strong>{healthy ? "Healthy" : "Not ready"}</strong></div>)}</div>
         <div className="recoveryCard">
           <div><h2>Localization recovery</h2><p>Globally reset AMCL, then rotate slowly until the lidar-to-map match is stable.</p></div>
@@ -584,7 +558,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           <div><small>Lease remaining</small><b>{hasLease ? `${status.lease_expires_in.toFixed(1)} s` : "None"}</b></div>
           <div><small>Linear / angular</small><b>{status.linear_velocity.toFixed(2)} / {status.angular_velocity.toFixed(2)}</b></div>
         </div>
-      </section>}
+      </section>
     </main>
 
     {busy && <div className="busy">{busy}…</div>}
@@ -593,7 +567,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 }
 
 const css = `
-  :root{color-scheme:dark}*{box-sizing:border-box}.sahabat{--bg:#0b1117;--surface:#121c25;--surface2:#182630;--line:#2b3e4b;--text:#edf4f7;--muted:#91a6b2;--teal:#42c8b5;--teal2:#176b63;--red:#e33d49;--amber:#e4ad45;font:13px Inter,system-ui,sans-serif;color:var(--text);background:var(--bg);min-height:100%;padding:14px}button,input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:9px 11px}button{cursor:pointer;font-weight:650}button:hover:not(:disabled){border-color:#5c7b8d}button:disabled{opacity:.38;cursor:not-allowed}h2,p{margin:0}h2{font-size:15px}p,span,small{color:var(--muted)}small{display:block;font-size:11px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.identity{display:grid;gap:5px}.identity>b{font-size:20px;letter-spacing:.16em;color:var(--teal)}.connection:before,.healthStrip span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px}.ok{color:var(--teal)!important}.bad{color:#ff7c85!important}.estop{background:#bd2633;border:2px solid #ff6570;color:white;font-size:16px;font-weight:900;padding:13px 20px}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:14px 0 8px}.summary>div{background:var(--surface);padding:9px;min-width:0}.summary strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}.healthStrip{display:flex;gap:12px;padding:5px 2px}.healthStrip span{font-size:11px}.controlBar{display:flex;align-items:center;gap:7px;margin:10px 0}.controlBar span{margin-left:auto;text-align:right}.primary{background:var(--teal2);border-color:var(--teal);color:white}.quiet{width:100%;background:transparent}nav{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin:12px 0}nav button{background:transparent;text-transform:uppercase;font-size:11px;letter-spacing:.08em}button.active{background:var(--teal2);border-color:var(--teal)}main{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:13px;min-height:250px}.stack{display:grid;gap:14px}.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.sectionTitle p{margin-top:4px}.warning{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#362a16;border:1px solid #795b24;border-radius:8px;padding:10px}.warning div{display:grid;gap:4px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px}.drivePad{min-height:115px;display:grid;place-items:center;text-align:center;gap:12px;background:var(--surface2);border-radius:8px;padding:14px}.drivePad>div:last-child{display:grid;gap:5px}.keys{display:grid;grid-template-columns:repeat(3,32px);grid-template-rows:repeat(2,30px);gap:4px}.keys i{display:grid;place-items:center;background:#243744;border:1px solid #486273;border-radius:5px;font-style:normal;font-weight:800}.keys i:first-child{grid-column:2}.command{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#2d2425;border-left:4px solid var(--red);border-radius:6px}.command.moving{background:#15332f;border-color:var(--teal)}.pose{text-align:center;color:var(--muted)}.form{display:grid;gap:10px}.form label,.coordinates label{display:grid;gap:5px;color:var(--muted)}.twoCol{grid-template-columns:2fr 1fr}.check{display:flex!important;align-items:center;gap:7px!important}.check input{width:auto}.actions,.patrol,.waypointActions{display:flex;flex-wrap:wrap;gap:6px}.list,.waypoints{display:grid;gap:7px}.list article,.waypoints article{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px}.list article{display:flex;justify-content:space-between;align-items:center}.list article>div{display:grid;gap:4px}.list article.selected{border-color:var(--teal)}.empty{text-align:center;color:var(--muted);padding:20px}.waypoints article.dock{border-left:4px solid var(--amber)}.waypointHead{display:flex;justify-content:space-between;gap:10px}.waypointHead>input{font-weight:750;flex:1}.coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}.coordinates input{min-width:0;width:100%}.dangerText{color:#ff8b93}.healthGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.healthGrid>div{padding:12px;background:var(--surface2);border-left:4px solid}.healthGrid strong{display:block;margin-top:5px}.healthy{border-color:var(--teal)!important}.unhealthy{border-color:var(--red)!important}.recoveryCard{display:grid;gap:12px;padding:13px;background:var(--surface2);border-radius:8px}.recoveryCard p{margin-top:5px}.recoveryState{display:grid;gap:4px}.recoveryState b{color:var(--amber)}.details{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.details>div{background:var(--surface2);padding:10px;border-radius:7px}.details b{display:block;margin-top:4px}.busy{position:sticky;bottom:5px;margin-top:8px;background:#203844;border:1px solid #477184;padding:9px;border-radius:7px}footer{position:sticky;bottom:5px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--amber);color:#151515;padding:9px;border-radius:7px}footer span{color:#151515}footer button{padding:2px 7px;background:transparent;border:0;color:#151515;font-size:18px}@media(max-width:560px){.summary{grid-template-columns:repeat(2,1fr)}.coordinates{grid-template-columns:repeat(2,1fr)}.twoCol{grid-template-columns:1fr}.controlBar{flex-wrap:wrap}.controlBar span{width:100%;text-align:left}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle>button{width:100%}}
+  :root{color-scheme:dark}*{box-sizing:border-box}.sahabat{--bg:#0b1117;--surface:#121c25;--surface2:#182630;--line:#2b3e4b;--text:#edf4f7;--muted:#91a6b2;--teal:#42c8b5;--teal2:#176b63;--red:#e33d49;--amber:#e4ad45;font:13px Inter,system-ui,sans-serif;color:var(--text);background:var(--bg);min-height:100%;padding:14px}button,input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:9px 11px}button{cursor:pointer;font-weight:650}button:hover:not(:disabled){border-color:#5c7b8d}button:disabled{opacity:.38;cursor:not-allowed}h2,p{margin:0}h2{font-size:15px}p,span,small{color:var(--muted)}small{display:block;font-size:11px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.identity{display:grid;gap:5px}.identity>b{font-size:20px;letter-spacing:.16em;color:var(--teal)}.connection:before,.healthStrip span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:6px}.ok{color:var(--teal)!important}.bad{color:#ff7c85!important}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:14px 0 8px}.summary>div{background:var(--surface);padding:9px;min-width:0}.summary strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}.healthStrip{display:flex;gap:12px;padding:5px 2px}.healthStrip span{font-size:11px}.controlBar{display:flex;align-items:center;gap:7px;margin:10px 0}.controlBar span{margin-left:auto;text-align:right}.primary{background:var(--teal2);border-color:var(--teal);color:white}.quiet{width:100%;background:transparent}button.active{background:var(--teal2);border-color:var(--teal)}main{display:grid;gap:14px;min-height:250px}.stack{display:grid;gap:14px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:13px}.driveSection{order:1}.healthSection{order:2}.mapsSection{order:3}.routesSection{order:4}.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.sectionTitle p{margin-top:4px}.warning{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#362a16;border:1px solid #795b24;border-radius:8px;padding:10px}.warning div{display:grid;gap:4px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px}.drivePad{min-height:115px;display:grid;place-items:center;text-align:center;gap:12px;background:var(--surface2);border-radius:8px;padding:14px}.drivePad>div:last-child{display:grid;gap:5px}.keys{display:grid;grid-template-columns:repeat(3,32px);grid-template-rows:repeat(2,30px);gap:4px}.keys i{display:grid;place-items:center;background:#243744;border:1px solid #486273;border-radius:5px;font-style:normal;font-weight:800}.keys i:first-child{grid-column:2}.speedControls input{width:100%;accent-color:var(--teal)}.command{display:flex;justify-content:space-between;align-items:center;padding:12px;background:#172832;border-left:4px solid #526d7d;border-radius:6px}.command.moving{background:#15332f;border-color:var(--teal)}.pose{text-align:center;color:var(--muted)}.form{display:grid;gap:10px}.form label,.coordinates label{display:grid;gap:5px;color:var(--muted)}.twoCol{grid-template-columns:2fr 1fr}.check{display:flex!important;align-items:center;gap:7px!important}.check input{width:auto}.actions,.patrol,.waypointActions{display:flex;flex-wrap:wrap;gap:6px}.list,.waypoints{display:grid;gap:7px}.list article,.waypoints article{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:10px}.list article{display:flex;justify-content:space-between;align-items:center}.list article>div{display:grid;gap:4px}.list article.selected{border-color:var(--teal)}.empty{text-align:center;color:var(--muted);padding:20px}.waypoints article.dock{border-left:4px solid var(--amber)}.waypointHead{display:flex;justify-content:space-between;gap:10px}.waypointHead>input{font-weight:750;flex:1}.coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:9px 0}.coordinates input{min-width:0;width:100%}.dangerText{color:#ff8b93}.healthGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.healthGrid>div{padding:12px;background:var(--surface2);border-left:4px solid}.healthGrid strong{display:block;margin-top:5px}.healthy{border-color:var(--teal)!important}.unhealthy{border-color:var(--red)!important}.recoveryCard{display:grid;gap:12px;padding:13px;background:var(--surface2);border-radius:8px}.recoveryCard p{margin-top:5px}.recoveryState{display:grid;gap:4px}.recoveryState b{color:var(--amber)}.details{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}.details>div{background:var(--surface2);padding:10px;border-radius:7px}.details b{display:block;margin-top:4px}.busy{position:sticky;bottom:5px;margin-top:8px;background:#203844;border:1px solid #477184;padding:9px;border-radius:7px}footer{position:sticky;bottom:5px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--amber);color:#151515;padding:9px;border-radius:7px}footer span{color:#151515}footer button{padding:2px 7px;background:transparent;border:0;color:#151515;font-size:18px}@media(max-width:560px){.summary{grid-template-columns:repeat(2,1fr)}.coordinates{grid-template-columns:repeat(2,1fr)}.twoCol{grid-template-columns:1fr}.controlBar{flex-wrap:wrap}.controlBar span{width:100%;text-align:left}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle>button{width:100%}}
 `;
 
 export function initOperatorPanel(context: PanelExtensionContext): () => void {

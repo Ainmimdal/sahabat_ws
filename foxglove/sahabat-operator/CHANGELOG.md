@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Replace tabbed navigation with one continuous operator screen.
+- Capture WASD at the Foxglove window level so the 3D panel can retain focus.
+- Keep gamepad polling active regardless of panel focus.
+- Add independent forward and turn speed controls.
+- Remove software E-stop controls and mode-switch latching from remote UI.
+- Keep localization recovery visible directly below manual drive.
+
 ## 0.2.0
 
 - Replace the crowded console tabs with Drive, Maps, Routes, and Health tasks.

@@ -20,7 +20,7 @@
         "poseTopic": "/operator/waypoint_candidate"
       }
     },
-    "Sahabat Operator!operate": { "view": "drive" }
+    "Sahabat Operator!operate": {}
   },
   "globalVariables": {},
   "userNodes": {},

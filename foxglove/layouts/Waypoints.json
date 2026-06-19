@@ -16,7 +16,7 @@
         "poseTopic": "/operator/waypoint_candidate"
       }
     },
-    "Sahabat Operator!routes": { "view": "routes" }
+    "Sahabat Operator!routes": {}
   },
   "globalVariables": {},
   "userNodes": {},

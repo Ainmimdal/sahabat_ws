@@ -77,7 +77,7 @@ class OperatorModeManager(Node):
             self.map_id = request.map_id
             self._publish_state('starting')
             response.success = True
-            response.message = f'Starting {request.mode}; E-stop remains active'
+            response.message = f'Starting {request.mode}'
             return response
 
     def _command(self, mode: str, map_id: str):

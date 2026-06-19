@@ -34,22 +34,20 @@ ros2 launch shbat_pkg remote_operations.launch.py
 ```
 
 This starts the persistent operator backend, command arbiter, restricted
-Foxglove bridge and mode manager. It starts in idle with
-the software E-stop active. Entering mapping while stationary clears that
-startup E-stop automatically. Mapping or localization hardware is only
-launched after the leased operator selects a mode.
+Foxglove bridge and mode manager. It starts in idle and does not start mapping
+or localization hardware until the leased operator selects a mode.
 
 Connect Foxglove Desktop to `ws://ROBOT_IP:8765`, add **Sahabat Operator**, and
 press **Take control**. Confirm the spotter is ready and the robot is stationary
-before starting mapping. Manual E-stop activation still requires **Clear
-E-stop** before driving again.
+before starting mapping.
 
 The panel is organized into **Drive**, **Maps**, **Routes**, and **Health**.
 Keyboard driving uses `W/A/S/D` directly. Gamepad driving requires selecting a
 controller but has no deadman button; moving the left stick commands motion and
 returning it to neutral commands zero. Selecting a different input mode, losing
 focus, losing the gamepad, losing the lease, or stopping teleop messages also
-commands zero. Manual speed is limited to 0.20 m/s and 0.60 rad/s.
+commands zero. The panel provides independent speed sliders up to 0.50 m/s and
+1.20 rad/s.
 
 Open a saved map from **Maps** to start complete operation mode. This loads
 localization, the map-specific waypoint file and its named `dock` pose. If the

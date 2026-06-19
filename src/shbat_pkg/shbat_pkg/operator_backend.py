@@ -50,8 +50,8 @@ class OperatorBackend(Node):
         self.declare_parameter('maps_directory', '~/sahabat_ws/maps')
         self.declare_parameter('lease_timeout', 5.0)
         self.declare_parameter('teleop_timeout', 0.25)
-        self.declare_parameter('max_linear_speed', 0.20)
-        self.declare_parameter('max_angular_speed', 0.60)
+        self.declare_parameter('max_linear_speed', 0.50)
+        self.declare_parameter('max_angular_speed', 1.20)
 
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)
@@ -73,7 +73,7 @@ class OperatorBackend(Node):
         self.lease_id = ''
         self.lease_owner = ''
         self.lease_deadline = 0.0
-        self.estop_active = True
+        self.estop_active = False
         self.remote_active = False
         self.last_remote_command = 0.0
         self.last_sequence = None
@@ -328,7 +328,7 @@ class OperatorBackend(Node):
         self.create_timer(0.05, self._safety_timer)
         self.create_timer(0.5, self._publish_status)
         self.create_timer(2.0, self._publish_waypoint_markers)
-        self._latch_estop('Operator backend started')
+        self.get_logger().info('Operator backend started')
 
     @staticmethod
     def _now() -> float:
@@ -776,7 +776,7 @@ class OperatorBackend(Node):
         if not yaml_path.exists():
             response.message = f'Map does not exist: {yaml_path}'
             return response
-        self._latch_estop('Map switch requested')
+        self._stop_remote()
         if abs(self.linear_velocity) > 0.01 or abs(self.angular_velocity) > 0.02:
             response.message = 'Robot did not become stationary'
             return response
@@ -1006,10 +1006,7 @@ class OperatorBackend(Node):
             if not yaml_path.exists():
                 response.message = 'Selected map does not exist'
                 return response
-        if request.mode == 'mapping':
-            self._stop_remote()
-        else:
-            self._latch_estop('Mode switch requested')
+        self._stop_remote()
         if not self.mode_client.wait_for_service(timeout_sec=1.0):
             response.message = 'Mode manager is unavailable'
             return response
@@ -1024,26 +1021,12 @@ class OperatorBackend(Node):
             return response
         response.success = result.success
         response.message = result.message
-        if result.success and request.mode == 'mapping':
-            if (
-                abs(self.linear_velocity) <= 0.01
-                and abs(self.angular_velocity) <= 0.02
-            ):
-                self.estop_active = False
-                self.estop_pub.publish(Bool(data=False))
-                response.message = f'{result.message}; E-stop cleared for mapping'
-            else:
-                response.success = False
-                response.message = (
-                    'Mapping started, but robot is not stationary; '
-                    'E-stop remains active'
-                )
         if result.success and request.mode in ('localization', 'operations'):
             if not self._wait_for_health(30.0):
                 response.success = False
                 response.message = (
                     'Mode started but map/scan/TF did not become healthy; '
-                    'E-stop remains active'
+                    'check Health and run localization recovery if needed'
                 )
         return response
 

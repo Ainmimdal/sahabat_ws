@@ -28,7 +28,6 @@ foxglove_bridge:
       - ^/zed/.*/image.*$
     service_whitelist:
       - ^/operator/control_lease$
-      - ^/operator/set_emergency_stop$
       - ^/operator/set_mode$
       - ^/operator/maps/.*$
       - ^/operator/waypoints/.*$

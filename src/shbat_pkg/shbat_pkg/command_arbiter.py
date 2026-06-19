@@ -66,7 +66,7 @@ class CommandArbiter(Node):
                 ),
             ),
         }
-        self.emergency_stop = True
+        self.emergency_stop = False
         self.source_enabled = {
             'joystick': False,
             'remote': False,
