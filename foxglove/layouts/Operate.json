@@ -1,0 +1,19 @@
+{
+  "configById": {
+    "3D!operate": {
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": { "backgroundColor": "#101820" },
+      "topics": {
+        "/map": { "visible": true }, "/scan": { "visible": true },
+        "/plan": { "visible": true }, "/local_plan": { "visible": true },
+        "/waypoint_markers": { "visible": true }, "/robot_description": { "visible": true }
+      },
+      "publish": { "type": "pose", "poseTopic": "/operator/waypoint_candidate", "poseEstimateTopic": "/operator/initial_pose_candidate" }
+    },
+    "Image!camera": { "imageMode": { "imageTopic": "/zed/zed_node/left/image_rect_color/compressed" } },
+    "Sahabat Operator!operate": {}
+  },
+  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
+  "layout": { "first": "3D!operate", "second": { "first": "Sahabat Operator!operate", "second": "Image!camera", "direction": "column", "splitPercentage": 72 }, "direction": "row", "splitPercentage": 66 }
+}

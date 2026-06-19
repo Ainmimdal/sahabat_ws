@@ -1,0 +1,12 @@
+{
+  "configById": {
+    "3D!mapping": {
+      "followMode": "follow-pose", "followTf": "base_link",
+      "topics": { "/map": { "visible": true }, "/map_updates": { "visible": true }, "/scan": { "visible": true }, "/tf": { "visible": true }, "/robot_description": { "visible": true } },
+      "publish": { "type": "pose", "poseTopic": "/operator/waypoint_candidate" }
+    },
+    "Sahabat Operator!mapping": {}
+  },
+  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
+  "layout": { "first": "3D!mapping", "second": "Sahabat Operator!mapping", "direction": "row", "splitPercentage": 70 }
+}

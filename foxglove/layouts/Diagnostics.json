@@ -1,0 +1,14 @@
+{
+  "configById": {
+    "3D!diagnostics": { "followMode": "follow-pose", "followTf": "base_link", "topics": { "/scan_raw": { "visible": true }, "/tf": { "visible": true }, "/tf_static": { "visible": true } } },
+    "RawMessages!status": { "topicPath": "/operator/status" },
+    "Log!rosout": { "searchTerms": [], "minLogLevel": 1 },
+    "Sahabat Operator!diagnostics": {}
+  },
+  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": { "first": "3D!diagnostics", "second": "Sahabat Operator!diagnostics", "direction": "row", "splitPercentage": 65 },
+    "second": { "first": "RawMessages!status", "second": "Log!rosout", "direction": "row", "splitPercentage": 50 },
+    "direction": "column", "splitPercentage": 68
+  }
+}
