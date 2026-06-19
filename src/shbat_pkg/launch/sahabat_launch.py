@@ -95,37 +95,24 @@ def is_zlac8015d_motor(port, timeout=0.5):
 def is_rplidar_s2(port, timeout=0.5):
     """
     Probe a serial port to check if it's an RPLIDAR S2.
-    
-    1. DTR power cycle to reset motor (prevents health status 2)
-    2. Opens at 115200 baud and checks for continuous scan data.
-    
+
+    Queries device information at the S2's documented 1,000,000 baud. Device
+    detection must not reset the sensor or pretend that DTR removes USB power.
+
     Returns: True if looks like RPLIDAR S2, False otherwise
     """
     try:
-        import time
-        
-        # DTR power cycle to reset the RPLIDAR motor
-        ser = serial.Serial(port, 115200, timeout=0.3)
-        ser.dtr = False
-        time.sleep(1.0)
-        ser.dtr = True
-        time.sleep(1.0)
-        ser.write(bytes([0xA5, 0x25]))  # STOP
-        ser.flush()
-        time.sleep(0.1)
-        ser.write(bytes([0xA5, 0x40]))  # RESET
-        ser.flush()
-        time.sleep(0.2)
-        ser.close()
-        
-        # Wait for motor to spin up, then check for scan data
-        time.sleep(0.5)
-        ser = serial.Serial(port, 115200, timeout=timeout)
-        ser.reset_input_buffer()
-        time.sleep(0.5)
-        available = ser.in_waiting
-        ser.close()
-        return available > 200
+        from shbat_pkg.lidar_recovery import get_device_info
+
+        with serial.Serial(
+            port=port,
+            baudrate=1_000_000,
+            timeout=timeout,
+            write_timeout=timeout,
+            exclusive=True,
+        ) as connection:
+            get_device_info(connection)
+        return True
     except Exception:
         return False
 
@@ -323,6 +310,11 @@ def smart_detect_devices():
                     print(f"→ Motor (known serial {port_serial})")
                 else:
                     print(f"→ Skipped (known serial, already have motor)")
+                continue
+
+            if port_serial == 'A5069RR4' and lidar_port is None:
+                lidar_port = port
+                print(f"→ RPLIDAR S2 (known serial {port_serial})")
                 continue
             
             # Probe for RPLIDAR S2

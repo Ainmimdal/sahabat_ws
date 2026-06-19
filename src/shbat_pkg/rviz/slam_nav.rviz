@@ -3,8 +3,8 @@ Panels:
     Name: Displays
   - Class: rviz_common/Views
     Name: Views
-  - Class: slam_toolbox::SlamToolboxPlugin
-    Name: SlamToolboxPlugin
+  - Class: shbat_rviz_plugins/Localization Recovery
+    Name: Localization Recovery
 Visualization Manager:
   Displays:
     - Class: rviz_default_plugins/Grid

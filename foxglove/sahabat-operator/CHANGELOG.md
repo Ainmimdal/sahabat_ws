@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0
+
+- Replace the crowded console tabs with Drive, Maps, Routes, and Health tasks.
+- Add lease-checked global localization recovery with live progress and stop.
+- Open saved maps in complete operations mode with map-specific routes and dock.
+- Use AMCL covariance in localization health instead of topic presence alone.
+- Remove the gamepad deadman setting; neutral stick and disconnect command zero.
+- Add dock capture, enabled-waypoint editing, lease release, and responsive cards.
+
 ## 0.1.3
 
 - Drive directly with W/A/S/D and stop without automatically latching E-stop

@@ -1,0 +1,13 @@
+uint8 NAVIGATE=0
+uint8 START=1
+uint8 PAUSE=2
+uint8 RESUME=3
+uint8 STOP=4
+
+uint8 command
+string waypoint_id
+bool loop
+string lease_id
+---
+bool success
+string message

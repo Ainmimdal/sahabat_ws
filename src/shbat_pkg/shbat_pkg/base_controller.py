@@ -83,12 +83,19 @@ class BaseController(Node):
             cmd_vel_qos
         )
         
-        # Emergency stop subscriber - directly stops motors
+        estop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
+
+        # Emergency stop subscriber - directly stops motors. Transient-local
+        # durability makes a restarted controller receive the current latch.
         self.estop_sub = self.create_subscription(
             Bool,
             'emergency_stop',
             self.emergency_stop_callback,
-            10
+            estop_qos,
         )
         
         # Publishers
@@ -99,6 +106,9 @@ class BaseController(Node):
         self.tf_broadcaster = TransformBroadcaster(self)
         
         # Emergency stop state
+        # The persistent operator backend publishes a transient-local `true`
+        # before this node is started in remote mode. Keep the legacy default
+        # here so established standalone launches retain their behavior.
         self.emergency_stopped = False
         
         # Odometry state

@@ -1,0 +1,5 @@
+string map_id
+string display_name
+string directory
+bool has_editable_session
+builtin_interfaces/Time modified_at

@@ -1,14 +1,32 @@
 {
   "configById": {
-    "3D!diagnostics": { "followMode": "follow-pose", "followTf": "base_link", "topics": { "/scan_raw": { "visible": true }, "/tf": { "visible": true }, "/tf_static": { "visible": true } } },
-    "RawMessages!status": { "topicPath": "/operator/status" },
-    "Log!rosout": { "searchTerms": [], "minLogLevel": 1 },
-    "Sahabat Operator!diagnostics": {}
+    "3D!health": {
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": { "backgroundColor": "#0b1117" },
+      "topics": {
+        "/map": { "visible": true },
+        "/scan": { "visible": true },
+        "/scan_raw": { "visible": false },
+        "/particle_cloud": { "visible": true },
+        "/robot_description": { "visible": true }
+      }
+    },
+    "Log!rosout": { "searchTerms": [], "minLogLevel": 2 },
+    "Sahabat Operator!health": { "view": "health" }
   },
-  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
   "layout": {
-    "first": { "first": "3D!diagnostics", "second": "Sahabat Operator!diagnostics", "direction": "row", "splitPercentage": 65 },
-    "second": { "first": "RawMessages!status", "second": "Log!rosout", "direction": "row", "splitPercentage": 50 },
-    "direction": "column", "splitPercentage": 68
+    "first": {
+      "first": "3D!health",
+      "second": "Sahabat Operator!health",
+      "direction": "row",
+      "splitPercentage": 64
+    },
+    "second": "Log!rosout",
+    "direction": "column",
+    "splitPercentage": 76
   }
 }

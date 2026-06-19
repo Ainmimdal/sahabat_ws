@@ -47,9 +47,16 @@ class WaypointManager(Node):
         self.loop_mode = True
         self.goal_handle = None
         
-        # Parameters
+        # Parameters. Keep the historical path as the default so existing
+        # commands behave exactly as before, while launches can now select an
+        # operational state file outside the source tree.
+        self.declare_parameter(
+            'waypoint_file',
+            '~/sahabat_ws/src/shbat_pkg/config/patrol_waypoints.yaml',
+        )
         self.waypoint_file = os.path.expanduser(
-            '~/sahabat_ws/src/shbat_pkg/config/patrol_waypoints.yaml')
+            self.get_parameter('waypoint_file').value
+        )
         
         # Mode: True = add waypoints, False = navigate
         self.add_mode = True
@@ -121,7 +128,7 @@ class WaypointManager(Node):
             # Get transform from map to base_link
             transform = self.tf_buffer.lookup_transform(
                 'map', 'base_link', rclpy.time.Time(), timeout=rclpy.duration.Duration(seconds=1.0))
-            
+
             x = transform.transform.translation.x
             y = transform.transform.translation.y
             q = transform.transform.rotation
@@ -448,6 +455,28 @@ class WaypointManager(Node):
         except Exception as e:
             return False, str(e)
 
+    def load_exhibits(self, exhibit_file):
+        """Load exhibits from exhibit_routes.yaml as waypoints"""
+        try:
+            if not os.path.exists(exhibit_file):
+                return False, "exhibit_routes.yaml not found"
+            with open(exhibit_file, 'r') as f:
+                data = yaml.safe_load(f)
+            if not data or 'exhibits' not in data:
+                return False, "No exhibits in file"
+
+            self.waypoints = []
+            for name, info in data['exhibits'].items():
+                self.waypoints.append({
+                    'name': name,
+                    'x': float(info['x']),
+                    'y': float(info['y']),
+                    'yaw': float(info.get('yaw', 0.0))
+                })
+            return True, f"Loaded {len(self.waypoints)} exhibits"
+        except Exception as e:
+            return False, str(e)
+
     def load_waypoints(self):
         """Load waypoints from file"""
         try:
@@ -492,7 +521,7 @@ class WaypointManagerGUI:
         
         # Use after() for ROS spinning instead of threading
         self.ros_spin()
-    
+
     def ros_spin(self):
         """Spin ROS using tkinter's after() - avoids threading issues"""
         if self.running:
@@ -618,6 +647,8 @@ class WaypointManagerGUI:
                    command=self.reload_waypoints).pack(side='left', padx=5)
         ttk.Button(file_frame, text="Save as Exhibits",
                    command=self.save_waypoints_as_exhibits).pack(side='left', padx=5)
+        ttk.Button(file_frame, text="Load Exhibits",
+                   command=self.load_waypoints_from_exhibits).pack(side='left', padx=5)
         
         # ===== LOG =====
         log_frame = ttk.LabelFrame(main, text="Log", padding="5")
@@ -744,7 +775,7 @@ class WaypointManagerGUI:
             self.log(f"OK: {msg}")
         else:
             self.log(f"ERR: {msg}")
-    
+
     def reload_waypoints(self):
         if self.node.load_waypoints():
             self.update_list()
@@ -763,7 +794,18 @@ class WaypointManagerGUI:
         else:
             messagebox.showerror("Export Failed", msg)
             self.log(f"ERR: {msg}")
-    
+
+    def load_waypoints_from_exhibits(self):
+        """Load exhibits from exhibit_routes.yaml as waypoints"""
+        exhibit_file = os.path.expanduser(
+            '~/sahabat_ws/src/shbat_pkg/config/exhibit_routes.yaml')
+        success, msg = self.node.load_exhibits(exhibit_file)
+        if success:
+            self.update_list()
+            self.log(f"OK: {msg}")
+        else:
+            self.log(f"ERR: {msg}")
+
     def run(self):
         self.root.mainloop()
 

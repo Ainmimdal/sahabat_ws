@@ -1,12 +1,30 @@
 {
   "configById": {
-    "3D!waypoints": {
-      "followMode": "follow-pose", "followTf": "base_link",
-      "topics": { "/map": { "visible": true }, "/scan": { "visible": true }, "/waypoint_markers": { "visible": true }, "/plan": { "visible": true } },
-      "publish": { "type": "pose", "poseTopic": "/operator/waypoint_candidate" }
+    "3D!routes": {
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "scene": { "backgroundColor": "#0b1117" },
+      "topics": {
+        "/map": { "visible": true },
+        "/scan": { "visible": true },
+        "/waypoint_markers": { "visible": true },
+        "/plan": { "visible": true },
+        "/robot_description": { "visible": true }
+      },
+      "publish": {
+        "type": "pose",
+        "poseTopic": "/operator/waypoint_candidate"
+      }
     },
-    "Sahabat Operator!waypoints": {}
+    "Sahabat Operator!routes": { "view": "routes" }
   },
-  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
-  "layout": { "first": "3D!waypoints", "second": "Sahabat Operator!waypoints", "direction": "row", "splitPercentage": 62 }
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": "3D!routes",
+    "second": "Sahabat Operator!routes",
+    "direction": "row",
+    "splitPercentage": 57
+  }
 }

@@ -85,6 +85,33 @@ def generate_launch_description():
         description='Launch Waypoint Manager GUI'
     )
     use_waypoint_gui = LaunchConfiguration('use_waypoint_gui')
+
+    joy_cmd_topic_arg = DeclareLaunchArgument(
+        'joy_cmd_topic', default_value='cmd_vel'
+    )
+    joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
+    smoothed_cmd_topic_arg = DeclareLaunchArgument(
+        'smoothed_cmd_topic', default_value='cmd_vel'
+    )
+    smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
+    recovery_cmd_topic_arg = DeclareLaunchArgument(
+        'recovery_cmd_topic', default_value='cmd_vel'
+    )
+    recovery_cmd_topic = LaunchConfiguration('recovery_cmd_topic')
+    operator_safety_arg = DeclareLaunchArgument(
+        'operator_safety', default_value='false'
+    )
+    operator_safety = LaunchConfiguration('operator_safety')
+
+    use_saved_initial_pose_arg = DeclareLaunchArgument(
+        'use_saved_initial_pose', default_value='false'
+    )
+    use_saved_initial_pose = LaunchConfiguration('use_saved_initial_pose')
+
+    initialize_from_dock_arg = DeclareLaunchArgument(
+        'initialize_from_dock', default_value='true'
+    )
+    initialize_from_dock = LaunchConfiguration('initialize_from_dock')
     
     # Initial pose for auto-localization
     initial_pose_x_arg = DeclareLaunchArgument(
@@ -111,7 +138,9 @@ def generate_launch_description():
     # Waypoint file
     waypoint_file_arg = DeclareLaunchArgument(
         'waypoint_file',
-        default_value=os.path.join(pkg_share, 'config', 'patrol_waypoints.yaml'),
+        default_value=os.path.expanduser(
+            '~/sahabat_ws/src/shbat_pkg/config/patrol_waypoints.yaml'
+        ),
         description='Path to waypoint patrol file'
     )
     waypoint_file = LaunchConfiguration('waypoint_file')
@@ -131,6 +160,10 @@ def generate_launch_description():
             'initial_pose_x': initial_pose_x,
             'initial_pose_y': initial_pose_y,
             'initial_pose_yaw': initial_pose_yaw,
+            'joy_cmd_topic': joy_cmd_topic,
+            'smoothed_cmd_topic': smoothed_cmd_topic,
+            'operator_safety': operator_safety,
+            'use_saved_initial_pose': use_saved_initial_pose,
         }.items()
     )
     
@@ -145,6 +178,7 @@ def generate_launch_description():
                 executable='waypoint_manager',
                 name='waypoint_manager',
                 output='screen',
+                parameters=[{'waypoint_file': waypoint_file}],
                 condition=IfCondition(use_waypoint_gui),
             )
         ]
@@ -159,6 +193,33 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(use_api),
     )
+
+    # ========== Exhibit Navigator ==========
+
+    exhibit_navigator = Node(
+        package='shbat_pkg',
+        executable='exhibit_navigator',
+        name='exhibit_navigator',
+        output='screen',
+        condition=IfCondition(use_api),
+    )
+
+    localization_recovery = Node(
+        package='shbat_pkg',
+        executable='localization_recovery',
+        name='localization_recovery',
+        output='screen',
+        parameters=[{'cmd_vel_topic': recovery_cmd_topic}],
+    )
+
+    dock_pose_initializer = Node(
+        package='shbat_pkg',
+        executable='dock_pose_initializer',
+        name='dock_pose_initializer',
+        output='screen',
+        parameters=[{'waypoint_file': waypoint_file}],
+        condition=IfCondition(initialize_from_dock),
+    )
     
     # ========== Return Launch Description ==========
     
@@ -170,6 +231,12 @@ def generate_launch_description():
         use_foxglove_arg,
         use_api_arg,
         use_waypoint_gui_arg,
+        joy_cmd_topic_arg,
+        smoothed_cmd_topic_arg,
+        recovery_cmd_topic_arg,
+        operator_safety_arg,
+        use_saved_initial_pose_arg,
+        initialize_from_dock_arg,
         initial_pose_x_arg,
         initial_pose_y_arg,
         initial_pose_yaw_arg,
@@ -183,4 +250,7 @@ def generate_launch_description():
         
         # API Bridge (optional)
         api_bridge,
+        exhibit_navigator,
+        localization_recovery,
+        dock_pose_initializer,
     ])

@@ -1,0 +1,12 @@
+uint8 ACQUIRE=0
+uint8 RENEW=1
+uint8 RELEASE=2
+
+uint8 action
+string client_id
+string lease_id
+---
+bool success
+string lease_id
+float32 expires_in
+string message

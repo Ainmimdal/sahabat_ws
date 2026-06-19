@@ -1,0 +1,5 @@
+string map_id
+---
+uint64 revision
+sahabat_interfaces/Waypoint[] waypoints
+string message

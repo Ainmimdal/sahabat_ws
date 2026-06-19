@@ -1,0 +1,46 @@
+foxglove_bridge:
+  ros__parameters:
+    port: 8765
+    address: 0.0.0.0
+    capabilities: [clientPublish, services, connectionGraph, assets]
+    topic_whitelist:
+      - ^/operator/.*$
+      - ^/tf$
+      - ^/tf_static$
+      - ^/map$
+      - ^/map_updates$
+      - ^/scan$
+      - ^/scan_raw$
+      - ^/odom$
+      - ^/amcl_pose$
+      - ^/particle_cloud$
+      - ^/plan$
+      - ^/local_plan$
+      - ^/(global|local)_costmap/.*$
+      - ^/waypoint_markers$
+      - ^/battery_state$
+      - ^/motor_enabled$
+      - ^/emergency_stop_active$
+      - ^/robot_description$
+      - ^/joint_states$
+      - ^/rosout$
+      - ^/foxglove_bridge/.*$
+      - ^/zed/.*/image.*$
+    service_whitelist:
+      - ^/operator/control_lease$
+      - ^/operator/set_emergency_stop$
+      - ^/operator/set_mode$
+      - ^/operator/maps/.*$
+      - ^/operator/waypoints/.*$
+      - ^/operator/patrol$
+      - ^/operator/localization/recovery$
+    param_whitelist: ['^(?!)$']
+    client_topic_whitelist:
+      - ^/operator/foxglove_joy$
+      - ^/operator/waypoint_candidate$
+    asset_uri_allowlist:
+      - ^package://shbat_pkg/.*\.(dae|glb|gltf|obj|stl|urdf|xacro)$
+    include_hidden: false
+    min_qos_depth: 1
+    max_qos_depth: 10
+    ignore_unresponsive_param_nodes: true

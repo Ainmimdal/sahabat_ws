@@ -1,0 +1,30 @@
+uint8 MODE_IDLE=0
+uint8 MODE_MAPPING=1
+uint8 MODE_LOCALIZATION=2
+uint8 MODE_OPERATIONS=3
+
+uint8 DIAGNOSTIC_OK=0
+uint8 DIAGNOSTIC_WARN=1
+uint8 DIAGNOSTIC_ERROR=2
+
+std_msgs/Header header
+uint8 mode
+string active_map
+string navigation_state
+bool emergency_stop
+bool motor_enabled
+string control_owner
+float32 lease_expires_in
+float32 battery_percentage
+geometry_msgs/Pose2D pose
+float32 linear_velocity
+float32 angular_velocity
+bool map_healthy
+bool scan_healthy
+bool tf_healthy
+bool localization_healthy
+uint8 diagnostic_level
+string diagnostic_message
+string active_operation
+bool localization_recovery_active
+string localization_recovery_status

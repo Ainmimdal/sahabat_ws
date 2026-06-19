@@ -68,7 +68,9 @@
 ### 2. Joystick Control
 - Left stick: Forward/backward + rotation (Xbox 360 mapping)
 - **Emergency Stop:** Button A (stops robot immediately)
-- **Resume:** Button B (clears emergency stop)
+- **Clear E-stop:** from the leased operator UI after confirming the area is safe
+- In remote-operator mode, releasing the remote UI deadman latches E-stop and
+  Button B cannot clear it; legacy launches retain their established mapping
 
 ### 3. Sensor Fusion (EKF)
 - Fuses wheel odometry + IMU
@@ -90,8 +92,10 @@
 - Auto-disables sensors not detected
 
 ### 6. SLAM Toolbox (2D Mapping)
-- **Launch:** `ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping`
+- **Launch:** `ros2 launch shbat_pkg navigation.launch.py mode:=mapping`
 - Lightweight 2D SLAM using LIDAR only
+- Opens the Sahabat Mapping GUI for naming and saving maps
+- Saves navigation maps and editable sessions under `~/sahabat_ws/maps/`
 - Config: `config/slam_toolbox.yaml`
 
 ### 7. Waypoint Manager (GUI)
@@ -176,6 +180,11 @@
 
 ## 🔧 Quick Commands
 
+> **Operational entry points:** The commands below remain supported. New work
+> should prefer `bringup.launch.py`, `navigation.launch.py`, and
+> `operations.launch.py`; see `OPERATIONAL_RUNBOOK.md` for the migration-safe
+> equivalents and pre-motion checks.
+
 ```bash
 # Source workspace
 cd ~/sahabat_ws
@@ -203,13 +212,14 @@ ros2 launch shbat_pkg localization_patrol_launch.py \
     use_api:=true
 
 # === SLAM MAPPING (create new map) ===
-ros2 launch shbat_pkg slam_nav_launch.py mode:=mapping
+ros2 launch shbat_pkg navigation.launch.py mode:=mapping
 
-# Save map after mapping
-ros2 run nav2_map_server map_saver_cli -f /home/sahabat/maps/my_map
+# Enter the map name and press Save Map in the Sahabat Mapping panel.
+# Output is stored under ~/sahabat_ws/maps/ by default.
 
 # === SLAM LOCALIZATION (use existing map) ===
-ros2 launch shbat_pkg slam_nav_launch.py mode:=localization map_file:=/home/sahabat/maps/my_map
+ros2 launch shbat_pkg navigation.launch.py \
+    mode:=localization map_file:=/home/sahabat/sahabat_ws/maps/gallery_map
 
 # === WAYPOINT MANAGER (GUI) ===
 ros2 run shbat_pkg waypoint_manager

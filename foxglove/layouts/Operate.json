@@ -3,17 +3,32 @@
     "3D!operate": {
       "followMode": "follow-pose",
       "followTf": "base_link",
-      "scene": { "backgroundColor": "#101820" },
+      "scene": { "backgroundColor": "#0b1117" },
       "topics": {
-        "/map": { "visible": true }, "/scan": { "visible": true },
-        "/plan": { "visible": true }, "/local_plan": { "visible": true },
-        "/waypoint_markers": { "visible": true }, "/robot_description": { "visible": true }
+        "/map": { "visible": true },
+        "/scan": { "visible": true },
+        "/particle_cloud": { "visible": true },
+        "/plan": { "visible": true },
+        "/local_plan": { "visible": true },
+        "/waypoint_markers": { "visible": true },
+        "/robot_description": { "visible": true },
+        "/global_costmap/costmap": { "visible": false },
+        "/local_costmap/costmap": { "visible": false }
       },
-      "publish": { "type": "pose", "poseTopic": "/operator/waypoint_candidate", "poseEstimateTopic": "/operator/initial_pose_candidate" }
+      "publish": {
+        "type": "pose",
+        "poseTopic": "/operator/waypoint_candidate"
+      }
     },
-    "Image!camera": { "imageMode": { "imageTopic": "/zed/zed_node/left/image_rect_color/compressed" } },
-    "Sahabat Operator!operate": {}
+    "Sahabat Operator!operate": { "view": "drive" }
   },
-  "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
-  "layout": { "first": "3D!operate", "second": { "first": "Sahabat Operator!operate", "second": "Image!camera", "direction": "column", "splitPercentage": 72 }, "direction": "row", "splitPercentage": 66 }
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": "3D!operate",
+    "second": "Sahabat Operator!operate",
+    "direction": "row",
+    "splitPercentage": 69
+  }
 }

@@ -1,0 +1,6 @@
+string map_id
+string lease_id
+---
+bool success
+string yaml_path
+string message

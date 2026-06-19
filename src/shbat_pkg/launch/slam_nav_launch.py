@@ -33,6 +33,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node, ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
+from launch_ros.parameter_descriptions import ParameterValue
 import xacro
 import yaml
 
@@ -114,6 +115,46 @@ def generate_launch_description():
     )
     use_zed = LaunchConfiguration('use_zed')
     
+    use_api_arg = DeclareLaunchArgument(
+        'use_api',
+        default_value='false',
+        description='Launch API Bridge for Pi/LLM control'
+    )
+    use_api = LaunchConfiguration('use_api')
+
+    use_mapping_panel_arg = DeclareLaunchArgument(
+        'use_mapping_panel',
+        default_value='true',
+        description='Open the simple map naming and saving panel'
+    )
+    use_mapping_panel = LaunchConfiguration('use_mapping_panel')
+
+    joy_cmd_topic_arg = DeclareLaunchArgument(
+        'joy_cmd_topic',
+        default_value='cmd_vel',
+        description='Joystick output; remote core overrides this safely'
+    )
+    joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
+
+    smoothed_cmd_topic_arg = DeclareLaunchArgument(
+        'smoothed_cmd_topic',
+        default_value='cmd_vel',
+        description='Smoothed Nav2 output; remote core overrides this safely'
+    )
+    smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
+
+    operator_safety_arg = DeclareLaunchArgument(
+        'operator_safety', default_value='false'
+    )
+    operator_safety = LaunchConfiguration('operator_safety')
+
+    use_saved_initial_pose_arg = DeclareLaunchArgument(
+        'use_saved_initial_pose',
+        default_value='false',
+        description='Seed AMCL from saved/launch pose instead of unlocalized',
+    )
+    use_saved_initial_pose = LaunchConfiguration('use_saved_initial_pose')
+
     # Initial pose for localization mode - defaults to saved pose from last session
     initial_pose_x_arg = DeclareLaunchArgument(
         'initial_pose_x',
@@ -410,16 +451,6 @@ def generate_launch_description():
     
     amcl_config = os.path.join(pkg_share, 'config', 'amcl.yaml')
     
-    # Static map->odom transform (identity) - used until AMCL takes over
-    # This prevents TF errors during startup
-    static_map_odom_tf = Node(
-        package='tf2_ros',
-        executable='static_transform_publisher',
-        name='static_map_odom',
-        arguments=['0', '0', '0', '0', '0', '0', 'map', 'odom'],
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"]))
-    )
-    
     # Map server - serves the saved map
     map_server = Node(
         package='nav2_map_server',
@@ -444,7 +475,9 @@ def generate_launch_description():
             {
                 # If initial pose is provided via launch args, use it
                 # Otherwise falls back to global localization from amcl.yaml
-                'set_initial_pose': True,
+                'set_initial_pose': ParameterValue(
+                    use_saved_initial_pose, value_type=bool
+                ),
                 'initial_pose.x': initial_pose_x,
                 'initial_pose.y': initial_pose_y,
                 'initial_pose.yaw': initial_pose_yaw,
@@ -483,7 +516,19 @@ def generate_launch_description():
         package='shbat_pkg',
         executable='joy2cmd',
         name='joy2cmd',
-        output='screen'
+        output='screen',
+        remappings=[('cmd_vel', joy_cmd_topic)],
+        parameters=[{
+            'max_linear_speed': ParameterValue(PythonExpression([
+                "0.20 if '", operator_safety, "' == 'true' else 0.5"
+            ]), value_type=float),
+            'max_angular_speed': ParameterValue(PythonExpression([
+                "0.60 if '", operator_safety, "' == 'true' else 1.0"
+            ]), value_type=float),
+            'allow_estop_clear': ParameterValue(PythonExpression([
+                "False if '", operator_safety, "' == 'true' else True"
+            ]), value_type=bool),
+        }]
     )
 
     # ========== Nav2 Stack ==========
@@ -557,7 +602,7 @@ def generate_launch_description():
         parameters=[nav2_config],
         remappings=[
             ('cmd_vel', 'cmd_vel_nav'),
-            ('cmd_vel_smoothed', 'cmd_vel')
+            ('cmd_vel_smoothed', smoothed_cmd_topic)
         ]
     )
     
@@ -589,6 +634,17 @@ def generate_launch_description():
         condition=IfCondition(use_rviz)
     )
 
+    mapping_panel = Node(
+        package='shbat_pkg',
+        executable='mapping_control_panel',
+        name='mapping_control_panel',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'mapping' and '",
+            use_mapping_panel, "' == 'true'"
+        ]))
+    )
+
     # ========== Foxglove Bridge (for remote visualization) ==========
     
     foxglove_bridge = Node(
@@ -605,6 +661,16 @@ def generate_launch_description():
         condition=IfCondition(use_foxglove)
     )
 
+    # ========== API Bridge (Pi/LLM Integration) ==========
+
+    api_bridge = Node(
+        package='shbat_pkg',
+        executable='api_bridge',
+        name='api_bridge',
+        output='screen',
+        condition=IfCondition(use_api)
+    )
+
     # ========== Auto Pose Saver ==========
     # Runs in background, saves pose whenever you use 2D Pose Estimate in RViz
     # Next launch will automatically use the saved pose
@@ -614,7 +680,10 @@ def generate_launch_description():
         executable='pose_saver_auto',
         name='auto_pose_saver',
         output='screen',
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"]))
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'localization' and '",
+            use_saved_initial_pose, "' == 'true'"
+        ]))
     )
 
     # ========== Return Launch Description ==========
@@ -628,6 +697,12 @@ def generate_launch_description():
         use_rviz_arg,
         use_foxglove_arg,
         use_zed_arg,
+        use_api_arg,
+        use_mapping_panel_arg,
+        joy_cmd_topic_arg,
+        smoothed_cmd_topic_arg,
+        operator_safety_arg,
+        use_saved_initial_pose_arg,
         motor_port_arg,
         lidar_port_arg,
         imu_port_arg,
@@ -660,7 +735,6 @@ def generate_launch_description():
         slam_toolbox_mapping,
         
         # AMCL + Map Server (localization mode only)
-        static_map_odom_tf,
         map_server,
         amcl_node,
         lifecycle_manager_localization,
@@ -684,7 +758,9 @@ def generate_launch_description():
         
         # RViz
         rviz_node,
+        mapping_panel,
         
         # Foxglove (remote visualization)
         foxglove_bridge,
+        api_bridge,
     ])

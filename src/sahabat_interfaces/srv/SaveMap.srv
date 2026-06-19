@@ -1,0 +1,9 @@
+string map_id
+string display_name
+bool save_editable_session
+bool overwrite
+string lease_id
+---
+bool success
+sahabat_interfaces/MapInfo map
+string message

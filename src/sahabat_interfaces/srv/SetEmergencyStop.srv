@@ -1,0 +1,7 @@
+bool active
+string lease_id
+string confirmation
+---
+bool success
+bool active
+string message

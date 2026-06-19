@@ -36,6 +36,7 @@ from action_msgs.msg import GoalStatus
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import signal
 import threading
 import math
 import json
@@ -113,6 +114,7 @@ class APIBridgeNode(Node):
         
         # Publishers
         self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.estop_pub = self.create_publisher(Bool, '/emergency_stop', 10)
         self.status_pub = self.create_publisher(String, '/robot_status', 10)
         self.exhibit_cmd_pub = self.create_publisher(String, '/exhibit_command', 10)
         
@@ -372,17 +374,22 @@ class APIBridgeNode(Node):
             return True
         return False
     
-    def emergency_stop(self):
-        """Immediately stop all motion"""
-        self.cancel_navigation()
-        
-        # Send zero velocity
-        stop_cmd = Twist()
-        for _ in range(5):  # Send multiple times to ensure it's received
-            self.cmd_vel_pub.publish(stop_cmd)
-        
-        self.status.nav_state = NavState.IDLE.value
-        self.get_logger().warn('EMERGENCY STOP executed')
+    def set_emergency_stop(self, active: bool = True):
+        """Set the base controller's latched emergency-stop state."""
+        if active:
+            self.cancel_navigation()
+
+            # Stop promptly while the latched command propagates to the motor
+            # controller. The latch then rejects later velocity commands.
+            stop_cmd = Twist()
+            for _ in range(5):
+                self.cmd_vel_pub.publish(stop_cmd)
+
+            self.status.nav_state = NavState.IDLE.value
+
+        self.estop_pub.publish(Bool(data=active))
+        message = 'executed' if active else 'cleared'
+        self.get_logger().warn(f'EMERGENCY STOP {message}')
     
     def send_exhibit_command(self, action: str, exhibit: str = None, exhibits: list = None):
         """Send a command to the exhibit navigator via /exhibit_command topic"""
@@ -525,12 +532,25 @@ def create_flask_app() -> Flask:
     
     @app.route('/emergency_stop', methods=['POST'])
     def emergency_stop():
-        """Emergency stop"""
+        """Set or clear the latched emergency stop.
+
+        An empty request activates it. To resume, send ``{"active": false}``.
+        """
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
-        
-        ros_node.emergency_stop()
-        return jsonify({'success': True, 'message': 'Emergency stop executed'})
+
+        data = request.get_json(silent=True) or {}
+        active = data.get('active', True)
+        if not isinstance(active, bool):
+            return jsonify({'error': 'active must be a boolean'}), 400
+
+        ros_node.set_emergency_stop(active)
+        action = 'executed' if active else 'cleared'
+        return jsonify({
+            'success': True,
+            'active': active,
+            'message': f'Emergency stop {action}',
+        })
     
     @app.route('/health', methods=['GET'])
     def health():
@@ -540,9 +560,27 @@ def create_flask_app() -> Flask:
     return app
 
 
+_flask_stop = False
+
 def run_flask(app: Flask, host: str, port: int):
-    """Run Flask in a separate thread"""
-    app.run(host=host, port=port, debug=False, threaded=True)
+    """Run Flask with clean shutdown support"""
+    from werkzeug.serving import make_server
+    global _flask_stop
+    server = make_server(host, port, app, threaded=True)
+    server.timeout = 1.0
+    ctx = app.app_context()
+    ctx.push()
+    while not _flask_stop:
+        server.handle_request()
+
+
+def _handle_sigint(sig, frame):
+    global _flask_stop
+    _flask_stop = True
+    try:
+        rclpy.shutdown()
+    except Exception:
+        pass
 
 
 def main(args=None):
@@ -557,17 +595,19 @@ def main(args=None):
     app = create_flask_app()
     
     # Get host/port from parameters or environment
-    host = os.environ.get('API_HOST', '0.0.0.0')  # Listen on all interfaces
+    host = os.environ.get('API_HOST', '0.0.0.0')
     port = int(os.environ.get('API_PORT', '5000'))
-    
+
     ros_node.get_logger().info(f'Starting API server on http://{host}:{port}')
-    
-    # Start Flask in a separate thread
+
+    # Handle SIGINT for clean shutdown
+    signal.signal(signal.SIGINT, _handle_sigint)
+
+    # Start Flask in daemon thread
     flask_thread = threading.Thread(
         target=run_flask, args=(app, host, port), daemon=True)
     flask_thread.start()
     
-    # Use MultiThreadedExecutor for concurrent callback handling
     executor = MultiThreadedExecutor()
     executor.add_node(ros_node)
     
@@ -576,6 +616,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        _flask_stop = True
         ros_node.destroy_node()
         rclpy.shutdown()
 

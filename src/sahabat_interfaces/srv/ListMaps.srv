@@ -1,0 +1,4 @@
+---
+sahabat_interfaces/MapInfo[] maps
+string active_map
+string message

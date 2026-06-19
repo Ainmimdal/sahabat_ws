@@ -1,0 +1,8 @@
+<library path="shbat_rviz_plugins">
+  <class
+    name="shbat_rviz_plugins/Localization Recovery"
+    type="shbat_rviz_plugins::LocalizationRecoveryPanel"
+    base_class_type="rviz_common::Panel">
+    <description>Start or stop AMCL global relocalization and scan rotation.</description>
+  </class>
+</library>
