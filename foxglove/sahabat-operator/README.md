@@ -14,3 +14,8 @@ Restart Foxglove Desktop, add **Sahabat Operator**, and connect to
 `ws://ROBOT_IP:8765`. Network firewalling is still required: the bridge itself
 does not authenticate clients. Do not expose it beyond the robot's private
 router.
+
+The `.foxe` file is a distribution archive and is not opened as a data file in
+Foxglove. For an unpublished local extension, use the commands above; the
+installer places the built extension in Foxglove Desktop's local extension
+directory.

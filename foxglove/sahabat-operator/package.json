@@ -8,7 +8,7 @@
   "scripts": {
     "build": "foxglove-extension build",
     "package": "foxglove-extension package",
-    "local-install": "foxglove-extension local-install"
+    "local-install": "foxglove-extension install"
   },
   "dependencies": {
     "react": "^18.3.1",
