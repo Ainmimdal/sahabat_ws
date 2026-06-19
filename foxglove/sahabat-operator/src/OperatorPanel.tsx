@@ -162,38 +162,58 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
         const result = await call<{ success: boolean; lease_id: string; message: string }>(
           "/operator/control_lease", { action: 1, client_id: clientId, lease_id: leaseRef.current },
         );
-        if (!result.success) { setLeaseId(""); await estop("lease renewal failed"); }
-      } catch { setLeaseId(""); await estop("bridge lost during lease renewal"); }
+        if (!result.success) {
+          publish(0, 0, false);
+          setLeaseId("");
+          setNotice("Control lease expired");
+        }
+      } catch {
+        publish(0, 0, false);
+        setLeaseId("");
+        setNotice("Bridge connection lost");
+      }
     }, 2000);
     return () => window.clearInterval(timer);
-  }, [call, clientId, estop, leaseId]);
+  }, [call, clientId, leaseId, publish]);
 
   const keyboardVelocity = useCallback(() => {
-    const held = keys.current.has("Space") && leaseRef.current !== "";
+    const held = ["KeyW", "KeyA", "KeyS", "KeyD"].some((key) => keys.current.has(key))
+      && leaseRef.current !== "";
     const linear = held ? (Number(keys.current.has("KeyW")) - Number(keys.current.has("KeyS"))) * 0.20 : 0;
     const angular = held ? (Number(keys.current.has("KeyA")) - Number(keys.current.has("KeyD"))) * 0.60 : 0;
     publish(linear, angular, held);
   }, [publish]);
 
   useEffect(() => {
-    if (inputMode !== "keyboard") return;
+    if (inputMode !== "keyboard" || tab !== "teleop") return;
+    const isEditable = (target: EventTarget | null) => target instanceof HTMLElement
+      && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName));
     const down = (event: KeyboardEvent) => {
-      if (["Space", "KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) event.preventDefault();
+      if (isEditable(event.target)) return;
+      if (!["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) return;
+      event.preventDefault();
       if (event.repeat) return;
       keys.current.add(event.code); keyboardVelocity();
     };
-    const up = (event: KeyboardEvent) => { keys.current.delete(event.code); keyboardVelocity(); };
+    const up = (event: KeyboardEvent) => {
+      if (!["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) return;
+      event.preventDefault();
+      keys.current.delete(event.code);
+      keyboardVelocity();
+    };
     const timer = window.setInterval(keyboardVelocity, 100);
     window.addEventListener("keydown", down); window.addEventListener("keyup", up);
     return () => {
       window.clearInterval(timer);
       window.removeEventListener("keydown", down);
       window.removeEventListener("keyup", up);
+      keys.current.clear();
+      publish(0, 0, false);
     };
-  }, [inputMode, keyboardVelocity]);
+  }, [inputMode, keyboardVelocity, publish, tab]);
 
   useEffect(() => {
-    const focusLost = () => { keys.current.clear(); void estop("Foxglove focus lost"); };
+    const focusLost = () => { keys.current.clear(); publish(0, 0, false); };
     const visibility = () => { if (document.hidden) focusLost(); };
     window.addEventListener("blur", focusLost);
     document.addEventListener("visibilitychange", visibility);
@@ -202,7 +222,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       document.removeEventListener("visibilitychange", visibility);
       publish(0, 0, false);
     };
-  }, [estop, publish]);
+  }, [publish]);
 
   useEffect(() => {
     if (inputMode !== "gamepad") return;
@@ -210,7 +230,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       const found = [...navigator.getGamepads()].filter((pad): pad is Gamepad => pad != null);
       setControllers(found);
       const pad = found.find((candidate) => candidate.index === controllerIndex);
-      if (!pad) { if (deadman) void estop("gamepad disconnected"); return; }
+      if (!pad) { if (deadman) publish(0, 0, false); return; }
       const held = Boolean(pad.buttons[deadmanButton]?.pressed) && Boolean(leaseRef.current);
       const axis = (value: number) => Math.abs(value) < deadzone ? 0 : value;
       const y = axis(pad.axes[1] ?? 0) * (invertY ? -1 : 1);
@@ -218,10 +238,10 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       publish(held ? y * 0.20 : 0, held ? -x * 0.60 : 0, held);
     }, 100);
     return () => window.clearInterval(timer);
-  }, [controllerIndex, deadman, deadmanButton, deadzone, estop, inputMode, invertY, publish]);
+  }, [controllerIndex, deadman, deadmanButton, deadzone, inputMode, invertY, publish]);
 
-  const changeInputMode = async (next: InputMode) => {
-    await estop("input mode changed");
+  const changeInputMode = (next: InputMode) => {
+    publish(0, 0, false);
     keys.current.clear(); setInputMode(next);
   };
 
@@ -297,9 +317,9 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     {tab === "console" && <section><div className="grid">{statusRows.map(([label, value]) => <div className="card" key={label}><small>{label}</small><strong>{value}</strong></div>)}</div>
       <div className="actions"><button onClick={() => void acquire()}>Take control</button><button disabled={!leaseId || !status.emergency_stop} onClick={() => void clearEstop()}>Clear E-stop</button>
       <button disabled={!leaseId} onClick={() => void switchMode("idle")}>Safe idle</button><button disabled={!leaseId} onClick={() => void switchMode("mapping")}>Start mapping</button></div></section>}
-    {tab === "teleop" && <section><div className="toggle"><button className={inputMode === "keyboard" ? "active" : ""} onClick={() => void changeInputMode("keyboard")}>Keyboard</button><button className={inputMode === "gamepad" ? "active" : ""} onClick={() => void changeInputMode("gamepad")}>Gamepad</button></div>
-      {inputMode === "keyboard" ? <div className="help"><b>Hold Space + W/A/S/D</b><span>Release any key or leave this window to stop.</span></div> : <div className="form"><label>Controller<select value={controllerIndex} onChange={(e) => setControllerIndex(Number(e.target.value))}><option value={-1}>Select controller</option>{controllers.map((pad) => <option key={pad.index} value={pad.index}>{pad.id}</option>)}</select></label><label>Deadzone<input type="number" min="0" max="0.5" step="0.01" value={deadzone} onChange={(e) => setDeadzone(Number(e.target.value))}/></label><label>Deadman button<input type="number" min="0" value={deadmanButton} onChange={(e) => setDeadmanButton(Number(e.target.value))}/></label><label><input type="checkbox" checked={invertY} onChange={(e) => setInvertY(e.target.checked)}/> Invert Y axis</label></div>}
-      <div className={`deadman ${deadman ? "held" : ""}`}>{deadman ? "DEADMAN HELD" : "STOPPED"}</div><code>linear {velocity.linear.toFixed(2)} m/s · angular {velocity.angular.toFixed(2)} rad/s</code></section>}
+    {tab === "teleop" && <section><div className="toggle"><button className={inputMode === "keyboard" ? "active" : ""} onClick={() => changeInputMode("keyboard")}>Keyboard</button><button className={inputMode === "gamepad" ? "active" : ""} onClick={() => changeInputMode("gamepad")}>Gamepad</button></div>
+      {inputMode === "keyboard" ? <div className="help"><b>Use W/A/S/D</b><span>Release the movement keys or leave this window to stop.</span></div> : <div className="form"><label>Controller<select value={controllerIndex} onChange={(e) => setControllerIndex(Number(e.target.value))}><option value={-1}>Select controller</option>{controllers.map((pad) => <option key={pad.index} value={pad.index}>{pad.id}</option>)}</select></label><label>Deadzone<input type="number" min="0" max="0.5" step="0.01" value={deadzone} onChange={(e) => setDeadzone(Number(e.target.value))}/></label><label>Deadman button<input type="number" min="0" value={deadmanButton} onChange={(e) => setDeadmanButton(Number(e.target.value))}/></label><label><input type="checkbox" checked={invertY} onChange={(e) => setInvertY(e.target.checked)}/> Invert Y axis</label></div>}
+      <div className={`deadman ${deadman ? "held" : ""}`}>{deadman ? (inputMode === "keyboard" ? "COMMANDING" : "DEADMAN HELD") : "STOPPED"}</div><code>linear {velocity.linear.toFixed(2)} m/s · angular {velocity.angular.toFixed(2)} rad/s</code></section>}
     {tab === "maps" && <section><div className="actions"><button onClick={() => void refreshMaps()}>Refresh</button></div><div className="form"><label>Map ID<input value={mapId} onChange={(e) => setMapId(e.target.value)}/></label><label>Display name<input value={mapName} onChange={(e) => setMapName(e.target.value)}/></label><label><input type="checkbox" checked={editable} onChange={(e) => setEditable(e.target.checked)}/> Keep editable SLAM session</label><button disabled={!leaseId} onClick={() => void saveMap()}>Save named map</button></div>{maps.map((map) => <div className="row" key={map.map_id}><div><b>{map.display_name}</b><small>{map.map_id}</small></div><button onClick={() => { setMapId(map.map_id); void switchMode("localization", map.map_id); }}>Load</button></div>)}</section>}
     {tab === "waypoints" && <section><div className="actions"><button onClick={() => void loadWaypoints()}>Load</button><button onClick={addCurrentPose}>Add current pose</button><button onClick={() => void saveWaypoints()}>Save revision {revision}</button><button onClick={() => void patrol(1)}>Patrol</button><button onClick={() => void patrol(2)}>Pause</button><button onClick={() => void patrol(3)}>Resume</button><button onClick={() => void patrol(4)}>Stop</button></div>{waypoints.map((point, index) => <div className="waypoint" key={point.id}><input aria-label="Name" value={point.name} onChange={(e) => updateWaypoint(index, {name: e.target.value})}/><input aria-label="X" type="number" step="0.05" value={point.pose.x} onChange={(e) => updateWaypoint(index, {pose: {...point.pose, x: Number(e.target.value)}})}/><input aria-label="Y" type="number" step="0.05" value={point.pose.y} onChange={(e) => updateWaypoint(index, {pose: {...point.pose, y: Number(e.target.value)}})}/><input aria-label="Yaw" type="number" step="0.05" value={point.pose.theta} onChange={(e) => updateWaypoint(index, {pose: {...point.pose, theta: Number(e.target.value)}})}/><input aria-label="Dwell" type="number" min="0" step="0.5" value={point.dwell_seconds} onChange={(e) => updateWaypoint(index, {dwell_seconds: Number(e.target.value)})}/><button disabled={index === 0} onClick={() => moveWaypoint(index, -1)}>↑</button><button disabled={index === waypoints.length - 1} onClick={() => moveWaypoint(index, 1)}>↓</button><button onClick={() => void patrol(0, point.id)}>Go</button><button onClick={() => setWaypoints((all) => all.filter((_, i) => i !== index))}>Delete</button></div>)}</section>}
     {notice && <footer>{notice}<button onClick={() => setNotice("")}>×</button></footer>}

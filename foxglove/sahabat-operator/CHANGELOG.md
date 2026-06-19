@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Drive directly with W/A/S/D and stop without automatically latching E-stop
+  on key release, focus loss, disconnect, lease expiry, or command timeout.
+- Clear the startup software E-stop automatically when entering mapping while
+  stationary.
+
 ## 0.1.2
 
 - Publish Foxglove teleop through the standard `sensor_msgs/Joy` schema so the
