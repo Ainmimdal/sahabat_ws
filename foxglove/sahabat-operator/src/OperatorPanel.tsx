@@ -44,22 +44,9 @@ const blankStatus: Status = {
   map_healthy: false, scan_healthy: false, tf_healthy: false, localization_healthy: false,
 };
 const modeNames = ["Idle", "Mapping", "Localization", "Gallery"];
-const teleopCommandDefinition = {
-  name: "sahabat_interfaces/TeleopCommand",
-  definitions: [
-    { name: "header", type: "std_msgs/Header", isComplex: true, isArray: false },
-    { name: "lease_id", type: "string", isComplex: false, isArray: false },
-    { name: "sequence", type: "uint32", isComplex: false, isArray: false },
-    { name: "deadman", type: "bool", isComplex: false, isArray: false },
-    { name: "twist", type: "geometry_msgs/Twist", isComplex: true, isArray: false },
-  ],
-};
 const teleopDatatypes = new Map([
-  ["builtin_interfaces/Time", ros2["builtin_interfaces/Time"]],
   ["std_msgs/Header", ros2["std_msgs/Header"]],
-  ["geometry_msgs/Vector3", ros2["geometry_msgs/Vector3"]],
-  ["geometry_msgs/Twist", ros2["geometry_msgs/Twist"]],
-  ["sahabat_interfaces/TeleopCommand", teleopCommandDefinition],
+  ["sensor_msgs/Joy", ros2["sensor_msgs/Joy"]],
 ]);
 
 function OperatorPanel({ context }: { context: PanelExtensionContext }): React.JSX.Element {
@@ -84,7 +71,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState("");
   const keys = useRef(new Set<string>());
-  const sequence = useRef(0);
   const lastPublish = useRef(0);
   const lastStatusAt = useRef(0);
   const leaseRef = useRef("");
@@ -97,21 +83,15 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 
   const publish = useCallback((linear: number, angular: number, held: boolean) => {
     if (!context.publish) return;
-    sequence.current += 1;
     lastPublish.current = performance.now();
-    context.publish("/operator/teleop_command", {
-      header: { stamp: { sec: 0, nanosec: 0 }, frame_id: clientId },
-      lease_id: leaseRef.current,
-      sequence: sequence.current,
-      deadman: held,
-      twist: {
-        linear: { x: linear, y: 0, z: 0 },
-        angular: { x: 0, y: 0, z: angular },
-      },
+    context.publish("/operator/foxglove_joy", {
+      header: { stamp: { sec: 0, nanosec: 0 }, frame_id: leaseRef.current },
+      axes: [linear, angular],
+      buttons: [held ? 1 : 0],
     });
     setDeadman(held);
     setVelocity({ linear, angular });
-  }, [clientId, context]);
+  }, [context]);
 
   const estop = useCallback(async (reason: string) => {
     publish(0, 0, false);
@@ -127,8 +107,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     context.watch("didSeek");
     context.subscribe([{ topic: "/operator/status" }, { topic: "/operator/waypoint_candidate" }]);
     context.advertise?.(
-      "/operator/teleop_command",
-      "sahabat_interfaces/TeleopCommand",
+      "/operator/foxglove_joy",
+      "sensor_msgs/Joy",
       { datatypes: teleopDatatypes },
     );
     context.onRender = (renderState, done) => {
@@ -152,7 +132,10 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       }
       done();
     };
-    return () => { context.onRender = undefined; };
+    return () => {
+      context.onRender = undefined;
+      context.unadvertise?.("/operator/foxglove_joy");
+    };
   }, [context]);
 
   useEffect(() => {

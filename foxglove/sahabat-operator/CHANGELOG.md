@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Publish Foxglove teleop through the standard `sensor_msgs/Joy` schema so the
+  bridge does not depend on a client-side custom message definition.
+
 ## 0.1.1
 
 - Keep connection state stable between status frames.
