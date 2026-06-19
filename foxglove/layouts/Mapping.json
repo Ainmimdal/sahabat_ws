@@ -2,11 +2,13 @@
   "configById": {
     "3D!mapping": {
       "followMode": "follow-pose", "followTf": "base_link",
+      "scene": { "backgroundColor": "#101820" },
       "topics": { "/map": { "visible": true }, "/map_updates": { "visible": true }, "/scan": { "visible": true }, "/tf": { "visible": true }, "/robot_description": { "visible": true } },
+      "layers": { "grid": { "visible": true, "frameLocked": true, "label": "Grid", "instanceId": "sahabat-mapping-grid", "layerId": "foxglove.Grid", "size": 10, "divisions": 20, "lineWidth": 1, "color": "#35505fff", "position": [0, 0, -0.02], "rotation": [0, 0, 0] } },
       "publish": { "type": "pose", "poseTopic": "/operator/waypoint_candidate" }
     },
     "Sahabat Operator!mapping": {}
   },
   "globalVariables": {}, "userNodes": {}, "playbackConfig": { "speed": 1 },
-  "layout": { "first": "3D!mapping", "second": "Sahabat Operator!mapping", "direction": "row", "splitPercentage": 70 }
+  "layout": { "first": "3D!mapping", "second": "Sahabat Operator!mapping", "direction": "row", "splitPercentage": 72 }
 }

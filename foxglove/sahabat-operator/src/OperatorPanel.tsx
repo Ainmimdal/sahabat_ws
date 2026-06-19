@@ -68,6 +68,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const keys = useRef(new Set<string>());
   const sequence = useRef(0);
   const lastPublish = useRef(0);
+  const lastStatusAt = useRef(0);
   const leaseRef = useRef("");
   leaseRef.current = leaseId;
 
@@ -109,10 +110,13 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     context.subscribe([{ topic: "/operator/status" }, { topic: "/operator/waypoint_candidate" }]);
     context.advertise?.("/operator/teleop_command", "sahabat_interfaces/msg/TeleopCommand");
     context.onRender = (renderState, done) => {
-      setConnected(Boolean(renderState.currentFrame));
       for (const event of renderState.currentFrame ?? []) {
         const item = event as MessageEvent<Status>;
-        if (item.topic === "/operator/status") setStatus(item.message);
+        if (item.topic === "/operator/status") {
+          lastStatusAt.current = performance.now();
+          setConnected(true);
+          setStatus(item.message);
+        }
         if (item.topic === "/operator/waypoint_candidate") {
           const candidate = (event as MessageEvent<PoseStamped>).message.pose;
           const yaw = 2 * Math.atan2(candidate.orientation.z, candidate.orientation.w);
@@ -128,6 +132,13 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     };
     return () => { context.onRender = undefined; };
   }, [context]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (performance.now() - lastStatusAt.current > 2000) setConnected(false);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const acquire = useCallback(async () => {
     try {
@@ -156,7 +167,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     const held = keys.current.has("Space") && leaseRef.current !== "";
     const linear = held ? (Number(keys.current.has("KeyW")) - Number(keys.current.has("KeyS"))) * 0.20 : 0;
     const angular = held ? (Number(keys.current.has("KeyA")) - Number(keys.current.has("KeyD"))) * 0.60 : 0;
-    publish(linear, angular, held && (linear !== 0 || angular !== 0));
+    publish(linear, angular, held);
   }, [publish]);
 
   useEffect(() => {
@@ -167,8 +178,13 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       keys.current.add(event.code); keyboardVelocity();
     };
     const up = (event: KeyboardEvent) => { keys.current.delete(event.code); keyboardVelocity(); };
+    const timer = window.setInterval(keyboardVelocity, 100);
     window.addEventListener("keydown", down); window.addEventListener("keyup", up);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
   }, [inputMode, keyboardVelocity]);
 
   useEffect(() => {
@@ -194,7 +210,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       const axis = (value: number) => Math.abs(value) < deadzone ? 0 : value;
       const y = axis(pad.axes[1] ?? 0) * (invertY ? -1 : 1);
       const x = axis(pad.axes[0] ?? 0);
-      publish(held ? y * 0.20 : 0, held ? -x * 0.60 : 0, held && (x !== 0 || y !== 0));
+      publish(held ? y * 0.20 : 0, held ? -x * 0.60 : 0, held);
     }, 100);
     return () => window.clearInterval(timer);
   }, [controllerIndex, deadman, deadmanButton, deadzone, estop, inputMode, invertY, publish]);
@@ -262,7 +278,9 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     ["Connection", connected ? "Connected" : "Disconnected"], ["Mode", modeNames[status.mode] ?? "Unknown"],
     ["Map", status.active_map || "None"], ["Lease", leaseId ? `Mine (${status.lease_expires_in.toFixed(1)}s)` : status.control_owner || "None"],
     ["Motors", status.motor_enabled ? "Enabled" : "Disabled"], ["Localization", status.localization_healthy ? "Healthy" : "Not ready"],
-    ["Navigation", status.navigation_state], ["Battery", Number.isFinite(status.battery_percentage) ? `${Math.round(status.battery_percentage)}%` : "Unknown"],
+    ["Map topic", status.map_healthy ? "Receiving" : "Missing"], ["Lidar", status.scan_healthy ? "Receiving" : "Missing"],
+    ["TF map→robot", status.tf_healthy ? "Healthy" : "Missing"], ["Navigation", status.navigation_state],
+    ["Battery", Number.isFinite(status.battery_percentage) ? `${Math.round(status.battery_percentage)}%` : "Unknown"],
   ], [connected, leaseId, status]);
 
   return <div className="sahabat">
@@ -273,7 +291,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       <button className={tab === name ? "active" : ""} onClick={() => setTab(name)} key={name}>{name}</button>)}</nav>
     {tab === "console" && <section><div className="grid">{statusRows.map(([label, value]) => <div className="card" key={label}><small>{label}</small><strong>{value}</strong></div>)}</div>
       <div className="actions"><button onClick={() => void acquire()}>Take control</button><button disabled={!leaseId || !status.emergency_stop} onClick={() => void clearEstop()}>Clear E-stop</button>
-      <button onClick={() => void switchMode("idle")}>Safe idle</button><button onClick={() => void switchMode("mapping")}>Start mapping</button></div></section>}
+      <button disabled={!leaseId} onClick={() => void switchMode("idle")}>Safe idle</button><button disabled={!leaseId} onClick={() => void switchMode("mapping")}>Start mapping</button></div></section>}
     {tab === "teleop" && <section><div className="toggle"><button className={inputMode === "keyboard" ? "active" : ""} onClick={() => void changeInputMode("keyboard")}>Keyboard</button><button className={inputMode === "gamepad" ? "active" : ""} onClick={() => void changeInputMode("gamepad")}>Gamepad</button></div>
       {inputMode === "keyboard" ? <div className="help"><b>Hold Space + W/A/S/D</b><span>Release any key or leave this window to stop.</span></div> : <div className="form"><label>Controller<select value={controllerIndex} onChange={(e) => setControllerIndex(Number(e.target.value))}><option value={-1}>Select controller</option>{controllers.map((pad) => <option key={pad.index} value={pad.index}>{pad.id}</option>)}</select></label><label>Deadzone<input type="number" min="0" max="0.5" step="0.01" value={deadzone} onChange={(e) => setDeadzone(Number(e.target.value))}/></label><label>Deadman button<input type="number" min="0" value={deadmanButton} onChange={(e) => setDeadmanButton(Number(e.target.value))}/></label><label><input type="checkbox" checked={invertY} onChange={(e) => setInvertY(e.target.checked)}/> Invert Y axis</label></div>}
       <div className={`deadman ${deadman ? "held" : ""}`}>{deadman ? "DEADMAN HELD" : "STOPPED"}</div><code>linear {velocity.linear.toFixed(2)} m/s · angular {velocity.angular.toFixed(2)} rad/s</code></section>}
