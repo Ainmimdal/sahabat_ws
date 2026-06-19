@@ -2,6 +2,7 @@ import type {
   MessageEvent,
   PanelExtensionContext,
 } from "@foxglove/extension";
+import { ros2humble as ros2 } from "@foxglove/rosmsg-msgs-common";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -43,6 +44,23 @@ const blankStatus: Status = {
   map_healthy: false, scan_healthy: false, tf_healthy: false, localization_healthy: false,
 };
 const modeNames = ["Idle", "Mapping", "Localization", "Gallery"];
+const teleopCommandDefinition = {
+  name: "sahabat_interfaces/TeleopCommand",
+  definitions: [
+    { name: "header", type: "std_msgs/Header", isComplex: true, isArray: false },
+    { name: "lease_id", type: "string", isComplex: false, isArray: false },
+    { name: "sequence", type: "uint32", isComplex: false, isArray: false },
+    { name: "deadman", type: "bool", isComplex: false, isArray: false },
+    { name: "twist", type: "geometry_msgs/Twist", isComplex: true, isArray: false },
+  ],
+};
+const teleopDatatypes = new Map([
+  ["builtin_interfaces/Time", ros2["builtin_interfaces/Time"]],
+  ["std_msgs/Header", ros2["std_msgs/Header"]],
+  ["geometry_msgs/Vector3", ros2["geometry_msgs/Vector3"]],
+  ["geometry_msgs/Twist", ros2["geometry_msgs/Twist"]],
+  ["sahabat_interfaces/TeleopCommand", teleopCommandDefinition],
+]);
 
 function OperatorPanel({ context }: { context: PanelExtensionContext }): React.JSX.Element {
   const [tab, setTab] = useState<Tab>("console");
@@ -108,7 +126,11 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     context.watch("currentFrame");
     context.watch("didSeek");
     context.subscribe([{ topic: "/operator/status" }, { topic: "/operator/waypoint_candidate" }]);
-    context.advertise?.("/operator/teleop_command", "sahabat_interfaces/msg/TeleopCommand");
+    context.advertise?.(
+      "/operator/teleop_command",
+      "sahabat_interfaces/TeleopCommand",
+      { datatypes: teleopDatatypes },
+    );
     context.onRender = (renderState, done) => {
       for (const event of renderState.currentFrame ?? []) {
         const item = event as MessageEvent<Status>;
