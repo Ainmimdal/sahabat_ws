@@ -510,6 +510,29 @@ class OperatorBackend(Node):
             1.0 - 2.0 * (q.y * q.y + q.z * q.z),
         )
 
+    def _status_pose(self):
+        """Return the robot pose in map when localization provides that TF."""
+        odom_pose = ('odom', self.pose_x, self.pose_y, self.pose_yaw)
+        if self.mode == OperatorStatus.MODE_IDLE:
+            return odom_pose
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                'map', 'base_link', rclpy.time.Time()
+            ).transform
+        except Exception:
+            return odom_pose
+        q = transform.rotation
+        yaw = math.atan2(
+            2.0 * (q.w * q.z + q.x * q.y),
+            1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+        )
+        return (
+            'map',
+            transform.translation.x,
+            transform.translation.y,
+            yaw,
+        )
+
     def _battery(self, message: BatteryState) -> None:
         value = float(message.percentage)
         self.battery_percentage = value * 100.0 if value <= 1.0 else value
@@ -556,8 +579,9 @@ class OperatorBackend(Node):
 
     def _publish_status(self) -> None:
         message = OperatorStatus()
+        pose_frame, pose_x, pose_y, pose_yaw = self._status_pose()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.header.frame_id = 'map'
+        message.header.frame_id = pose_frame
         message.mode = self.mode
         message.active_map = self.active_map
         message.navigation_state = self.navigation_state
@@ -566,9 +590,9 @@ class OperatorBackend(Node):
         message.control_owner = self.lease_owner
         message.lease_expires_in = max(0.0, self.lease_deadline - self._now())
         message.battery_percentage = float(self.battery_percentage)
-        message.pose.x = self.pose_x
-        message.pose.y = self.pose_y
-        message.pose.theta = self.pose_yaw
+        message.pose.x = pose_x
+        message.pose.y = pose_y
+        message.pose.theta = pose_yaw
         message.linear_velocity = self.linear_velocity
         message.angular_velocity = self.angular_velocity
         message.map_healthy, message.scan_healthy, message.tf_healthy = (

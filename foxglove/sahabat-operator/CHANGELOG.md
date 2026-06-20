@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- Save current-pose and dock waypoints from `map -> base_link`, matching RViz.
+- Label the displayed pose frame and disable capture until map TF is available.
+
 ## 0.2.3
 
 - Use three equal columns for Drive, Maps, and Routes.

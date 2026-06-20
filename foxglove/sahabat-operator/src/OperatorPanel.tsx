@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 
 type InputMode = "keyboard" | "gamepad";
 type Status = {
+  header?: { frame_id: string };
   mode: number;
   active_map: string;
   emergency_stop: boolean;
@@ -46,6 +47,7 @@ type PoseStamped = {
 };
 
 const blankStatus: Status = {
+  header: { frame_id: "odom" },
   mode: 0,
   active_map: "",
   emergency_stop: true,
@@ -372,15 +374,25 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     setNotice(result.message);
   };
 
-  const addCurrentPose = () => setWaypoints((old) => [...old, {
-    id: crypto.randomUUID(),
-    name: `Waypoint ${old.length + 1}`,
-    pose: { ...status.pose },
-    dwell_seconds: 0,
-    enabled: true,
-  }]);
+  const addCurrentPose = () => {
+    if (status.header?.frame_id !== "map") {
+      setNotice("Map-frame robot pose is not available yet");
+      return;
+    }
+    setWaypoints((old) => [...old, {
+      id: crypto.randomUUID(),
+      name: `Waypoint ${old.length + 1}`,
+      pose: { ...status.pose },
+      dwell_seconds: 0,
+      enabled: true,
+    }]);
+  };
 
   const setDockHere = () => setWaypoints((old) => {
+    if (status.header?.frame_id !== "map") {
+      setNotice("Map-frame robot pose is not available yet");
+      return old;
+    }
     const existing = old.findIndex((item) => item.name.trim().toLowerCase() === "dock");
     const dock: Waypoint = {
       id: existing >= 0 ? old[existing]!.id : crypto.randomUUID(),
@@ -437,6 +449,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const hasLease = leaseId !== "";
   const canMove = connected && hasLease;
   const recoveryActive = status.localization_recovery_active === true;
+  const mapPoseReady = status.header?.frame_id === "map";
 
   return <div className="sahabat">
     <style>{css}</style>
@@ -497,7 +510,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           <strong>{commanding ? "COMMANDING" : hasLease ? "READY" : "NO CONTROL"}</strong>
           <span>{velocity.linear.toFixed(2)} m/s · {velocity.angular.toFixed(2)} rad/s</span>
         </div>
-        <div className="pose">Pose <b>{status.pose.x.toFixed(2)}, {status.pose.y.toFixed(2)}</b> · yaw <b>{status.pose.theta.toFixed(2)}</b></div>
+        <div className="pose">Pose ({status.header?.frame_id ?? "unknown"}) <b>{status.pose.x.toFixed(2)}, {status.pose.y.toFixed(2)}</b> · yaw <b>{status.pose.theta.toFixed(2)}</b></div>
         <div className={`compactRecovery ${status.localization_healthy ? "healthy" : "unhealthy"}`}>
           <div><b>Localization</b><span>{recoveryActive ? "Rotating…" : status.localization_healthy ? "Matched" : status.mode < 2 ? "Load map first" : "Needs recovery"}</span></div>
           <button disabled={!canMove || recoveryActive || status.mode < 2} onClick={() => void run("Starting recovery", () => localizationRecovery(0))}>Recover</button>
@@ -527,8 +540,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       <section className="stack routesSection">
         <div className="sectionTitle"><div><h2>Routes · {status.active_map || "no map"}</h2><p>Click a pose in the 3D panel or capture the robot’s current pose.</p></div><button disabled={!status.active_map} onClick={() => void run("Loading routes", loadWaypoints)}>Reload</button></div>
         <div className="actions">
-          <button disabled={!status.active_map} onClick={addCurrentPose}>Add current pose</button>
-          <button disabled={!status.active_map} onClick={setDockHere}>Set dock here</button>
+          <button disabled={!status.active_map || !mapPoseReady} onClick={addCurrentPose}>Add current pose</button>
+          <button disabled={!status.active_map || !mapPoseReady} onClick={setDockHere}>Set dock here</button>
           <button className="primary" disabled={!hasLease || !status.active_map} onClick={() => void run("Saving routes", saveWaypoints)}>Save changes</button>
         </div>
         <div className="patrol">
