@@ -4,8 +4,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -24,6 +25,18 @@ def generate_launch_description():
         DeclareLaunchArgument('mobile_private_key', default_value=''),
         DeclareLaunchArgument('mobile_token_file', default_value=''),
     ]
+
+    hardware = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(share, 'launch', 'bringup.launch.py')
+        ),
+        launch_arguments={
+            'use_sim_time': 'false',
+            'joy_cmd_topic': 'cmd_vel_joy',
+            'lidar_scan_topic': 'scan_raw',
+            'use_scan_filter': 'true',
+        }.items(),
+    )
 
     backend = Node(
         package='shbat_pkg',
@@ -68,6 +81,7 @@ def generate_launch_description():
     )
     return LaunchDescription(
         arguments + [
+            hardware,
             backend,
             arbiter,
             mode_manager,

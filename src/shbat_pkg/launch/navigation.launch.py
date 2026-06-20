@@ -27,6 +27,7 @@ def generate_launch_description():
     joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
     smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
     operator_safety = LaunchConfiguration('operator_safety')
+    use_hardware = LaunchConfiguration('use_hardware')
 
     arguments = [
         DeclareLaunchArgument(
@@ -43,6 +44,7 @@ def generate_launch_description():
         DeclareLaunchArgument('joy_cmd_topic', default_value='cmd_vel'),
         DeclareLaunchArgument('smoothed_cmd_topic', default_value='cmd_vel'),
         DeclareLaunchArgument('operator_safety', default_value='false'),
+        DeclareLaunchArgument('use_hardware', default_value='true'),
     ]
 
     odom_only = IncludeLaunchDescription(
@@ -70,6 +72,7 @@ def generate_launch_description():
             'joy_cmd_topic': joy_cmd_topic,
             'smoothed_cmd_topic': smoothed_cmd_topic,
             'operator_safety': operator_safety,
+            'use_hardware': use_hardware,
         }.items(),
         condition=IfCondition(
             PythonExpression(["'", mode, "' != 'odom_only'"])

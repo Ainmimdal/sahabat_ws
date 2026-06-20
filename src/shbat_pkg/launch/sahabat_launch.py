@@ -530,8 +530,37 @@ def generate_launch_description():
     )
     publish_robot_state = LaunchConfiguration('publish_robot_state')
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time',
+        default_value='true',
+        description='Use simulation time for the robot description publishers'
+    )
+    use_sim_time = LaunchConfiguration('use_sim_time')
+
+    joy_cmd_topic_arg = DeclareLaunchArgument(
+        'joy_cmd_topic',
+        default_value='cmd_vel',
+        description='Joystick velocity output topic'
+    )
+    joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
+
+    lidar_scan_topic_arg = DeclareLaunchArgument(
+        'lidar_scan_topic',
+        default_value='scan',
+        description='Raw output topic from the lidar driver'
+    )
+    lidar_scan_topic = LaunchConfiguration('lidar_scan_topic')
+
+    use_scan_filter_arg = DeclareLaunchArgument(
+        'use_scan_filter',
+        default_value='false',
+        description='Filter lidar_scan_topic into /scan'
+    )
+    use_scan_filter = LaunchConfiguration('use_scan_filter')
+
     # Specify the name of the package and path to xacro file within the package
     pkg_name = 'shbat_pkg'
+    pkg_share = get_package_share_directory(pkg_name)
     file_subpath = 'urdf/sahabat_robot.urdf.xacro'
 
     # Use xacro to process the file
@@ -544,7 +573,7 @@ def generate_launch_description():
         executable='robot_state_publisher',
         output='screen',
         parameters=[{'robot_description': robot_description_raw},
-                    {'use_sim_time': True}],
+                    {'use_sim_time': use_sim_time}],
         condition=IfCondition(publish_robot_state)
     )
 
@@ -584,8 +613,17 @@ def generate_launch_description():
             {'angle_compensate': True},
             {'scan_mode': 'DenseBoost'},
         ],
-        remappings=[('scan', 'scan')],
+        remappings=[('scan', lidar_scan_topic)],
         condition=IfCondition(use_lidar)
+    )
+
+    node_scan_filter = Node(
+        package='shbat_pkg',
+        executable='scan_filter',
+        name='scan_filter',
+        output='screen',
+        parameters=[os.path.join(pkg_share, 'config', 'scan_filter.yaml')],
+        condition=IfCondition(use_scan_filter)
     )
 
     node_imu = Node(
@@ -613,7 +651,8 @@ def generate_launch_description():
         package='shbat_pkg',
         executable='joy2cmd',
         name='joy2cmd',
-        output='screen'
+        output='screen',
+        remappings=[('cmd_vel', joy_cmd_topic)]
     )
 
     node_joy_node = Node(
@@ -682,6 +721,10 @@ def generate_launch_description():
         lidar_port_arg,
         imu_port_arg,
         publish_robot_state_arg,
+        use_sim_time_arg,
+        joy_cmd_topic_arg,
+        lidar_scan_topic_arg,
+        use_scan_filter_arg,
         
         # Core nodes (always run)
         node_robot_state_publisher,
@@ -699,6 +742,7 @@ def generate_launch_description():
         # Sensors (conditional based on detection)
         node_imu,
         node_lidar_scan,
+        node_scan_filter,
         
         # Motor controller
         node_base_controller

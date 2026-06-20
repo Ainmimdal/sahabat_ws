@@ -102,6 +102,10 @@ def generate_launch_description():
         'operator_safety', default_value='false'
     )
     operator_safety = LaunchConfiguration('operator_safety')
+    use_hardware_arg = DeclareLaunchArgument(
+        'use_hardware', default_value='true'
+    )
+    use_hardware = LaunchConfiguration('use_hardware')
 
     use_saved_initial_pose_arg = DeclareLaunchArgument(
         'use_saved_initial_pose', default_value='false'
@@ -164,6 +168,7 @@ def generate_launch_description():
             'smoothed_cmd_topic': smoothed_cmd_topic,
             'operator_safety': operator_safety,
             'use_saved_initial_pose': use_saved_initial_pose,
+            'use_hardware': use_hardware,
         }.items()
     )
     
@@ -235,6 +240,7 @@ def generate_launch_description():
         smoothed_cmd_topic_arg,
         recovery_cmd_topic_arg,
         operator_safety_arg,
+        use_hardware_arg,
         use_saved_initial_pose_arg,
         initialize_from_dock_arg,
         initial_pose_x_arg,

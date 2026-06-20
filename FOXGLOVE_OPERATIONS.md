@@ -33,15 +33,19 @@ layouts in `foxglove/layouts/`: **Operate**, **Mapping**, **Waypoints**, and
 ros2 launch shbat_pkg remote_operations.launch.py
 ```
 
-This starts the persistent operator backend, command arbiter, restricted
-Foxglove bridge and mode manager. It starts in idle and does not start mapping
-or localization hardware until the leased operator selects a mode.
+This starts hardware bringup once, plus the persistent operator backend,
+command arbiter, restricted Foxglove bridge and mode manager. Manual driving is
+available in Idle after taking control. Mapping and localization add only their
+navigation layers, so switching modes does not restart the motor, lidar or
+odometry nodes.
 
 Connect Foxglove Desktop to `ws://ROBOT_IP:8765`, add **Sahabat Operator**, and
 press **Take control**. Confirm the spotter is ready and the robot is stationary
 before starting mapping.
 
-The panel is organized into **Drive**, **Maps**, **Routes**, and **Health**.
+The panel uses a responsive two-column workspace with Drive and compact health
+on the left, and Maps and Routes on the right. It collapses to one column only
+when the panel is narrow.
 Keyboard driving uses `W/A/S/D` directly. Gamepad driving requires selecting a
 controller but has no deadman button; moving the left stick commands motion and
 returning it to neutral commands zero. Selecting a different input mode, losing
@@ -51,8 +55,8 @@ commands zero. The panel provides independent speed sliders up to 0.50 m/s and
 
 Open a saved map from **Maps** to start complete operation mode. This loads
 localization, the map-specific waypoint file and its named `dock` pose. If the
-lidar overlay does not match the map, open **Health** and select **Global
-relocalize + rotate**. The robot rotates at 0.25 rad/s until AMCL covariance is
+lidar overlay does not match the map, select **Global relocalize + rotate**
+directly below Drive. The robot rotates at 0.25 rad/s until AMCL covariance is
 stable, or stops on E-stop, stale lidar, operator cancellation, or timeout.
 
 Maps are stored as:

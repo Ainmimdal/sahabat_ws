@@ -20,6 +20,10 @@ def generate_launch_description():
     arguments = [
         DeclareLaunchArgument('use_ekf', default_value='true'),
         DeclareLaunchArgument('publish_robot_state', default_value='true'),
+        DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument('joy_cmd_topic', default_value='cmd_vel'),
+        DeclareLaunchArgument('lidar_scan_topic', default_value='scan'),
+        DeclareLaunchArgument('use_scan_filter', default_value='false'),
     ]
 
     legacy_bringup = IncludeLaunchDescription(
@@ -29,6 +33,10 @@ def generate_launch_description():
         launch_arguments={
             'use_kalman_filter': LaunchConfiguration('use_ekf'),
             'publish_robot_state': LaunchConfiguration('publish_robot_state'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'joy_cmd_topic': LaunchConfiguration('joy_cmd_topic'),
+            'lidar_scan_topic': LaunchConfiguration('lidar_scan_topic'),
+            'use_scan_filter': LaunchConfiguration('use_scan_filter'),
         }.items(),
     )
 

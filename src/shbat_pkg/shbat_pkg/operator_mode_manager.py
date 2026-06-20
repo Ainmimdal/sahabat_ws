@@ -64,10 +64,12 @@ class OperatorModeManager(Node):
                 response.message = 'Invalid mode or map'
                 return response
             try:
+                child_environment = os.environ.copy()
+                child_environment['SAHABAT_SKIP_DEVICE_DETECTION'] = '1'
                 self.process = subprocess.Popen(
                     command,
                     start_new_session=True,
-                    env=os.environ.copy(),
+                    env=child_environment,
                 )
             except OSError as error:
                 response.message = f'Could not start mode: {error}'
@@ -89,6 +91,7 @@ class OperatorModeManager(Node):
                 'use_mapping_panel:=false', 'joy_cmd_topic:=cmd_vel_joy',
                 'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
                 'operator_safety:=true',
+                'use_hardware:=false',
             ]
         if mode in ('localization', 'operations'):
             map_stem = self.maps_directory / map_id / 'map'
@@ -104,6 +107,7 @@ class OperatorModeManager(Node):
                     'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
                     'recovery_cmd_topic:=cmd_vel_recovery',
                     'operator_safety:=true',
+                    'use_hardware:=false',
                     f'waypoint_file:={waypoint_file}',
                 ]
             return [
@@ -113,6 +117,7 @@ class OperatorModeManager(Node):
                 'joy_cmd_topic:=cmd_vel_joy',
                 'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
                 'operator_safety:=true',
+                'use_hardware:=false',
             ]
         return None
 

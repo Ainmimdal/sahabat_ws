@@ -1,6 +1,8 @@
 # Sahabat Foxglove extension
 
-The extension provides four focused views: Drive, Maps, Routes, and Health.
+The extension provides a responsive two-column Drive, Maps, Routes, and health
+workspace. Hardware stays available in Idle, so teleoperation does not require
+starting mapping or loading a map first.
 It includes lease-aware WASD/gamepad teleoperation, named map management,
 map-specific dock and waypoint editing, patrol controls, diagnostics, and
 automatic AMCL global relocalization. The robot-side bridge must be started

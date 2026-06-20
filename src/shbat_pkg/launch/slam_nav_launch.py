@@ -37,15 +37,19 @@ from launch_ros.parameter_descriptions import ParameterValue
 import xacro
 import yaml
 
-# Import USB detection
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:
-    from sahabat_launch import smart_detect_devices
-    lidar_port, imu_port, motor_port = smart_detect_devices()
-except Exception as e:
-    print(f"Warning: Could not import device detection: {e}")
+# The persistent remote bringup already owns the serial devices. Avoid probing
+# those live ports again when a managed navigation-only child is launched.
+if os.environ.get('SAHABAT_SKIP_DEVICE_DETECTION') == '1':
     lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+else:
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from sahabat_launch import smart_detect_devices
+        lidar_port, imu_port, motor_port = smart_detect_devices()
+    except Exception as e:
+        print(f"Warning: Could not import device detection: {e}")
+        lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
 
 # Try to load saved pose from previous session
 SAVED_POSE_FILE = os.path.expanduser('~/.ros/sahabat_saved_pose.yaml')
@@ -148,6 +152,18 @@ def generate_launch_description():
     )
     operator_safety = LaunchConfiguration('operator_safety')
 
+    use_hardware_arg = DeclareLaunchArgument(
+        'use_hardware',
+        default_value='true',
+        description='Start physical hardware, sensors, joystick, and odometry'
+    )
+    use_hardware = LaunchConfiguration('use_hardware')
+
+    def hardware_and(feature):
+        return IfCondition(PythonExpression([
+            "'", use_hardware, "' == 'true' and '", feature, "' == 'true'"
+        ]))
+
     use_saved_initial_pose_arg = DeclareLaunchArgument(
         'use_saved_initial_pose',
         default_value='false',
@@ -211,14 +227,16 @@ def generate_launch_description():
         executable='robot_state_publisher',
         name='robot_state_publisher',
         output='screen',
-        parameters=[{'robot_description': robot_description}]
+        parameters=[{'robot_description': robot_description}],
+        condition=IfCondition(use_hardware)
     )
     
     joint_state_publisher = Node(
         package='joint_state_publisher',
         executable='joint_state_publisher',
         name='joint_state_publisher',
-        output='screen'
+        output='screen',
+        condition=IfCondition(use_hardware)
     )
 
     # ========== Base Controller ==========
@@ -243,7 +261,8 @@ def generate_launch_description():
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
             {'odom_rate': 20.0},
-        ]
+        ],
+        condition=IfCondition(use_hardware)
     )
 
     # ========== LIDAR ==========
@@ -268,7 +287,7 @@ def generate_launch_description():
             {'scan_mode': 'DenseBoost'},
         ],
         remappings=[('scan', 'scan_raw')],  # Route through scan_filter
-        condition=IfCondition(use_lidar)
+        condition=hardware_and(use_lidar)
     )
     
     scan_filter_config = os.path.join(pkg_share, 'config', 'scan_filter.yaml')
@@ -278,7 +297,7 @@ def generate_launch_description():
         name='scan_filter',
         output='screen',
         parameters=[scan_filter_config],
-        condition=IfCondition(use_lidar)
+        condition=hardware_and(use_lidar)
     )
 
     # ========== IMU ==========
@@ -296,7 +315,7 @@ def generate_launch_description():
             'topic_name': '/witmotion',
         }],
         remappings=[('/witmotion/imu', '/imu')],
-        condition=IfCondition(use_imu)
+        condition=hardware_and(use_imu)
     )
 
     # ========== ZED Camera (Obstacle Detection) ==========
@@ -315,7 +334,7 @@ def generate_launch_description():
     # base_link is at wheel axle height (8.75cm above floor for 175mm wheels)
     # ZED is 70cm from floor, so Z = 70 - 8.75 = 61.25cm
     zed_static_tf = Node(
-        condition=IfCondition(use_zed),
+        condition=hardware_and(use_zed),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_base_link_tf',
@@ -371,7 +390,7 @@ def generate_launch_description():
     # These are the transforms from zed_camera_link to the optical frames
     # Values from ZED 2i specs: left camera is 6cm from center
     zed_left_camera_tf = Node(
-        condition=IfCondition(use_zed),
+        condition=hardware_and(use_zed),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_left_camera_tf',
@@ -389,7 +408,7 @@ def generate_launch_description():
     
     # Optical frame has different orientation (Z forward, X right, Y down)
     zed_left_optical_tf = Node(
-        condition=IfCondition(use_zed),
+        condition=hardware_and(use_zed),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_left_optical_tf',
@@ -407,7 +426,7 @@ def generate_launch_description():
     
     # Container for ZED components (just ZED wrapper, pointcloud goes directly to costmap)
     zed_container = ComposableNodeContainer(
-        condition=IfCondition(use_zed),
+        condition=hardware_and(use_zed),
         name='zed_container',
         namespace='zed',
         package='rclcpp_components',
@@ -430,7 +449,8 @@ def generate_launch_description():
         parameters=[ekf_config],
         remappings=[
             ('odometry/filtered', 'odom'),
-        ]
+        ],
+        condition=IfCondition(use_hardware)
     )
 
     # ========== SLAM Toolbox (Mapping Mode Only) ==========
@@ -509,7 +529,8 @@ def generate_launch_description():
         package='joy',
         executable='joy_node',
         name='joy_node',
-        output='screen'
+        output='screen',
+        condition=IfCondition(use_hardware)
     )
     
     joy2cmd = Node(
@@ -528,7 +549,8 @@ def generate_launch_description():
             'allow_estop_clear': ParameterValue(PythonExpression([
                 "False if '", operator_safety, "' == 'true' else True"
             ]), value_type=bool),
-        }]
+        }],
+        condition=IfCondition(use_hardware)
     )
 
     # ========== Nav2 Stack ==========
@@ -702,6 +724,7 @@ def generate_launch_description():
         joy_cmd_topic_arg,
         smoothed_cmd_topic_arg,
         operator_safety_arg,
+        use_hardware_arg,
         use_saved_initial_pose_arg,
         motor_port_arg,
         lidar_port_arg,

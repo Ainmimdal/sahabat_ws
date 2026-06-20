@@ -28,6 +28,7 @@ def generate_launch_description():
         ('smoothed_cmd_topic', 'cmd_vel'),
         ('recovery_cmd_topic', 'cmd_vel'),
         ('operator_safety', 'false'),
+        ('use_hardware', 'true'),
         ('use_saved_initial_pose', 'false'),
         ('initialize_from_dock', 'true'),
         ('initial_pose_x', '0.0'),

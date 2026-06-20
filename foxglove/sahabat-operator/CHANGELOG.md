@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Use a responsive two-column console and give it more layout width.
+- Collapse duplicate health cards into a compact status and recovery block.
+- Keep hardware bringup alive in Idle so teleoperation does not require a map.
+- Start and stop only navigation layers when switching operating modes.
+
 ## 0.2.1
 
 - Replace tabbed navigation with one continuous operator screen.
