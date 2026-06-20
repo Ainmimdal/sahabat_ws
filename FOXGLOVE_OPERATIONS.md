@@ -43,9 +43,9 @@ Connect Foxglove Desktop to `ws://ROBOT_IP:8765`, add **Sahabat Operator**, and
 press **Take control**. Confirm the spotter is ready and the robot is stationary
 before starting mapping.
 
-The panel uses a responsive two-column workspace with Drive and compact health
-on the left, and Maps and Routes on the right. It collapses to one column only
-when the panel is narrow.
+The panel uses three columns: Drive, Maps, and Routes. Health stays in the thin
+status strip, and localization recovery is one compact row inside Drive. It
+collapses to one column only when the panel is very narrow.
 Keyboard driving uses `W/A/S/D` directly. Gamepad driving requires selecting a
 controller but has no deadman button; moving the left stick commands motion and
 returning it to neutral commands zero. Selecting a different input mode, losing

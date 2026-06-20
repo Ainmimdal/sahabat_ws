@@ -280,7 +280,11 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     const timer = window.setInterval(() => {
       const found = [...navigator.getGamepads()].filter((pad): pad is Gamepad => pad != null);
       setControllers(found);
-      const pad = found.find((candidate) => candidate.index === controllerIndex);
+      const selectedIndex = found.some((pad) => pad.index === controllerIndex)
+        ? controllerIndex
+        : (found[0]?.index ?? -1);
+      if (selectedIndex !== controllerIndex) setControllerIndex(selectedIndex);
+      const pad = found.find((candidate) => candidate.index === selectedIndex);
       if (!pad) {
         publish(0, 0, false);
         return;
@@ -456,6 +460,8 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       {healthItems.map(([label, healthy]) => (
         <span className={healthy ? "ok" : "bad"} key={label}>{label}</span>
       ))}
+      <span>Motors: <b>{status.motor_enabled ? "on" : "off"}</b></span>
+      <span>Battery: <b>{Number.isFinite(status.battery_percentage) ? `${Math.round(status.battery_percentage)}%` : "—"}</b></span>
     </div>
 
     <div className="controlBar">
@@ -467,11 +473,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 
     <main>
       <section className="stack driveSection">
-        {!status.localization_healthy && status.mode >= 2 && <div className="warning">
-          <div><b>Localization needs attention</b><span>Check the lidar overlay, then run recovery if it does not match the map.</span></div>
-          <button disabled={!canMove || recoveryActive} onClick={() => void run("Starting recovery", () => localizationRecovery(0))}>Recover</button>
-        </div>}
-
         <div className="sectionTitle"><div><h2>Manual drive</h2><p>WASD or one selected gamepad. No deadman button.</p></div><button onClick={stopTeleop}>Stop command</button></div>
         <div className="segmented">
           <button className={inputMode === "keyboard" ? "active" : ""} onClick={() => { stopTeleop(); setInputMode("keyboard"); }}>Keyboard</button>
@@ -481,9 +482,9 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
         {inputMode === "keyboard" ? <div className="drivePad">
           <div className="keys"><i>W</i><i>A</i><i>S</i><i>D</i></div>
           <div><b>Drive with WASD</b><span>Works while Foxglove is active, including over the 3D view. Releasing the keys stops.</span></div>
-        </div> : <div className="form twoCol">
-          <label>Controller<select value={controllerIndex} onChange={(event) => setControllerIndex(Number(event.target.value))}><option value={-1}>Select a connected controller</option>{controllers.map((pad) => <option key={pad.index} value={pad.index}>{pad.id}</option>)}</select></label>
-          <label>Stick deadzone<input type="number" min="0" max="0.5" step="0.01" value={deadzone} onChange={(event) => setDeadzone(Number(event.target.value))}/></label>
+        </div> : <div className="gamepadBox">
+          <label>Controller<select value={controllerIndex} onChange={(event) => setControllerIndex(Number(event.target.value))}><option value={-1}>No controller detected</option>{controllers.map((pad) => <option key={pad.index} value={pad.index}>{pad.id}</option>)}</select></label>
+          <label>Deadzone<input type="number" min="0" max="0.5" step="0.01" value={deadzone} onChange={(event) => setDeadzone(Number(event.target.value))}/></label>
           <label className="check"><input type="checkbox" checked={invertY} onChange={(event) => setInvertY(event.target.checked)}/> Invert forward axis</label>
         </div>}
 
@@ -497,6 +498,11 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           <span>{velocity.linear.toFixed(2)} m/s · {velocity.angular.toFixed(2)} rad/s</span>
         </div>
         <div className="pose">Pose <b>{status.pose.x.toFixed(2)}, {status.pose.y.toFixed(2)}</b> · yaw <b>{status.pose.theta.toFixed(2)}</b></div>
+        <div className={`compactRecovery ${status.localization_healthy ? "healthy" : "unhealthy"}`}>
+          <div><b>Localization</b><span>{recoveryActive ? "Rotating…" : status.localization_healthy ? "Matched" : status.mode < 2 ? "Load map first" : "Needs recovery"}</span></div>
+          <button disabled={!canMove || recoveryActive || status.mode < 2} onClick={() => void run("Starting recovery", () => localizationRecovery(0))}>Recover</button>
+          {recoveryActive && <button onClick={() => void run("Stopping recovery", () => localizationRecovery(1))}>Stop</button>}
+        </div>
       </section>
 
       <section className="stack mapsSection">
@@ -545,19 +551,6 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
         ))}</div>
       </section>
 
-      <section className="stack healthSection">
-        <div className="recoveryCard">
-          <div><h2>Localization recovery</h2><p>Globally reset AMCL, then rotate slowly until the lidar-to-map match is stable.</p></div>
-          <div className="recoveryState"><b>{recoveryActive ? "ROTATING" : "IDLE"}</b><span>{status.localization_recovery_status || "Not running"}</span></div>
-          <div className="actions"><button className="primary" disabled={!canMove || recoveryActive || status.mode < 2} onClick={() => void run("Starting recovery", () => localizationRecovery(0))}>Global relocalize + rotate</button><button disabled={!hasLease || !recoveryActive} onClick={() => void run("Stopping recovery", () => localizationRecovery(1))}>Stop recovery</button></div>
-        </div>
-        <div className="details">
-          <div><small>Motors</small><b>{status.motor_enabled ? "Enabled" : "Disabled"}</b></div>
-          <div><small>Battery</small><b>{Number.isFinite(status.battery_percentage) ? `${Math.round(status.battery_percentage)}%` : "Unknown"}</b></div>
-          <div><small>Lease remaining</small><b>{hasLease ? `${status.lease_expires_in.toFixed(1)} s` : "None"}</b></div>
-          <div><small>Linear / angular</small><b>{status.linear_velocity.toFixed(2)} / {status.angular_velocity.toFixed(2)}</b></div>
-        </div>
-      </section>
     </main>
 
     {busy && <div className="busy">{busy}…</div>}
@@ -567,6 +560,24 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 
 const css = `
   :root{color-scheme:dark}*{box-sizing:border-box}.sahabat{--bg:#0b1117;--surface:#121c25;--surface2:#182630;--line:#2b3e4b;--text:#edf4f7;--muted:#91a6b2;--teal:#42c8b5;--teal2:#176b63;--red:#e33d49;--amber:#e4ad45;font:13px Inter,system-ui,sans-serif;color:var(--text);background:var(--bg);min-height:100%;padding:10px}button,input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:8px 10px}button{cursor:pointer;font-weight:650}button:hover:not(:disabled){border-color:#5c7b8d}button:disabled{opacity:.38;cursor:not-allowed}h2,p{margin:0}h2{font-size:14px}p,span,small{color:var(--muted)}small{display:block;font-size:10px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:10px}.identity{display:flex;align-items:center;gap:12px}.identity>b{font-size:17px;letter-spacing:.14em;color:var(--teal)}.connection:before,.healthStrip span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:5px}.ok{color:var(--teal)!important}.bad{color:#ff7c85!important}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:8px 0 5px}.summary>div{background:var(--surface);padding:6px 8px;min-width:0}.summary strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.healthStrip{display:flex;flex-wrap:wrap;gap:5px 12px;padding:3px 1px}.healthStrip span{font-size:10px}.controlBar{display:flex;align-items:center;gap:7px;margin:6px 0 9px}.controlBar span{margin-left:auto;text-align:right}.primary{background:var(--teal2);border-color:var(--teal);color:white}.quiet{width:100%;background:transparent}button.active{background:var(--teal2);border-color:var(--teal)}main{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(380px,1.25fr);grid-template-areas:"drive maps" "health routes";align-items:start;gap:10px;min-height:250px}.stack{display:grid;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:10px}.driveSection{grid-area:drive}.healthSection{grid-area:health}.mapsSection{grid-area:maps}.routesSection{grid-area:routes}.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.sectionTitle p{margin-top:3px}.warning{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#362a16;border:1px solid #795b24;border-radius:8px;padding:8px}.warning div{display:grid;gap:3px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px}.drivePad{min-height:82px;display:flex;justify-content:center;align-items:center;text-align:left;gap:16px;background:var(--surface2);border-radius:8px;padding:9px}.drivePad>div:last-child{display:grid;gap:4px}.keys{display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(2,26px);gap:3px}.keys i{display:grid;place-items:center;background:#243744;border:1px solid #486273;border-radius:5px;font-style:normal;font-weight:800}.keys i:first-child{grid-column:2}.speedControls input{width:100%;accent-color:var(--teal)}.command{display:flex;justify-content:space-between;align-items:center;padding:9px;background:#172832;border-left:4px solid #526d7d;border-radius:6px}.command.moving{background:#15332f;border-color:var(--teal)}.pose{text-align:center;color:var(--muted)}.form{display:grid;gap:8px}.form label,.coordinates label{display:grid;gap:4px;color:var(--muted)}.twoCol{grid-template-columns:2fr 1fr}.check{display:flex!important;align-items:center;gap:7px!important}.check input{width:auto}.actions,.patrol,.waypointActions{display:flex;flex-wrap:wrap;gap:5px}.list,.waypoints{display:grid;gap:6px}.list article,.waypoints article{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:8px}.list article{display:flex;justify-content:space-between;align-items:center}.list article>div{display:grid;gap:3px}.list article.selected{border-color:var(--teal)}.empty{text-align:center;color:var(--muted);padding:14px}.waypoints article.dock{border-left:4px solid var(--amber)}.waypointHead{display:flex;justify-content:space-between;gap:8px}.waypointHead>input{font-weight:750;flex:1}.coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:7px 0}.coordinates input{min-width:0;width:100%}.dangerText{color:#ff8b93}.recoveryCard{display:grid;grid-template-columns:minmax(170px,1fr) auto;gap:7px 10px;align-items:center;padding:8px;background:var(--surface2);border-radius:8px}.recoveryCard p{margin-top:3px}.recoveryState{display:grid;gap:2px;text-align:right}.recoveryState b{color:var(--amber)}.recoveryCard .actions{grid-column:1/-1}.details{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.details>div{background:var(--surface2);padding:6px;border-radius:6px;min-width:0}.details b{display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.busy{position:sticky;bottom:5px;margin-top:7px;background:#203844;border:1px solid #477184;padding:8px;border-radius:7px}footer{position:sticky;bottom:5px;margin-top:7px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--amber);color:#151515;padding:8px;border-radius:7px}footer span{color:#151515}footer button{padding:2px 7px;background:transparent;border:0;color:#151515;font-size:18px}@media(max-width:820px){main{grid-template-columns:1fr;grid-template-areas:"drive" "health" "maps" "routes"}}@media(max-width:560px){.summary{grid-template-columns:repeat(2,1fr)}.coordinates,.details{grid-template-columns:repeat(2,1fr)}.twoCol{grid-template-columns:1fr}.controlBar{flex-wrap:wrap}.controlBar span{width:100%;text-align:left}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle>button{width:100%}.drivePad{align-items:center;flex-direction:column;text-align:center}.recoveryCard{grid-template-columns:1fr}.recoveryState{text-align:left}.recoveryCard .actions{grid-column:auto}}
+  /* Three-column operator layout. These overrides intentionally come last. */
+  main{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:none;gap:8px}
+  .driveSection,.mapsSection,.routesSection{grid-area:auto;min-width:0}
+  .stack{min-width:0;padding:9px;gap:8px}
+  .sectionTitle{flex-wrap:wrap}
+  .sectionTitle>div{min-width:0;flex:1}
+  .gamepadBox{display:grid;grid-template-columns:minmax(0,1fr) 86px;gap:7px;align-items:end}
+  .gamepadBox label{display:grid;gap:4px;color:var(--muted);min-width:0}
+  .gamepadBox select{width:100%;min-width:0;text-overflow:ellipsis}
+  .gamepadBox .check{grid-column:1/-1}
+  .coordinates{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .waypointHead{flex-wrap:wrap}
+  .waypointHead>input{min-width:120px}
+  .compactRecovery{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:5px;border-left:3px solid;padding:6px 7px;background:var(--surface2);border-radius:6px}
+  .compactRecovery>div{display:grid;gap:1px;min-width:0}
+  .compactRecovery span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+  .compactRecovery button{padding:5px 7px}
+  @media(max-width:650px){main{grid-template-columns:1fr}.gamepadBox{grid-template-columns:minmax(0,1fr) 86px}}
 `;
 
 export function initOperatorPanel(context: PanelExtensionContext): () => void {

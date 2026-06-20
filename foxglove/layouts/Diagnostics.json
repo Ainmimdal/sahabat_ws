@@ -23,7 +23,7 @@
       "first": "3D!health",
       "second": "Sahabat Operator!health",
       "direction": "row",
-      "splitPercentage": 55
+      "splitPercentage": 40
     },
     "second": "Log!rosout",
     "direction": "column",

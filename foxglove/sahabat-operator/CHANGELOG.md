@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.3
+
+- Use three equal columns for Drive, Maps, and Routes.
+- Replace the large recovery card with one compact row inside Drive.
+- Automatically select the first available gamepad.
+- Make controller controls and waypoint fields fit narrow columns.
+
 ## 0.2.2
 
 - Use a responsive two-column console and give it more layout width.

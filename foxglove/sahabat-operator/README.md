@@ -1,8 +1,8 @@
 # Sahabat Foxglove extension
 
-The extension provides a responsive two-column Drive, Maps, Routes, and health
-workspace. Hardware stays available in Idle, so teleoperation does not require
-starting mapping or loading a map first.
+The extension provides a three-column Drive, Maps, and Routes workspace with a
+compact status strip and localization recovery row. Hardware stays available
+in Idle, so teleoperation does not require starting mapping or loading a map.
 It includes lease-aware WASD/gamepad teleoperation, named map management,
 map-specific dock and waypoint editing, patrol controls, diagnostics, and
 automatic AMCL global relocalization. The robot-side bridge must be started

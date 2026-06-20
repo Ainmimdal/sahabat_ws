@@ -1,6 +1,6 @@
 {
   "name": "sahabat-operator",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Sahabat robot drive, mapping, route, and recovery console",
   "publisher": "sahabat",
