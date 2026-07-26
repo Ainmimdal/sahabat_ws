@@ -5,6 +5,7 @@
 
 #include <QLabel>
 #include <QPushButton>
+#include <QTimer>
 
 #include "rclcpp/rclcpp.hpp"
 #include "rviz_common/panel.hpp"
@@ -26,6 +27,7 @@ public:
 private Q_SLOTS:
   void startRecovery();
   void stopRecovery();
+  void updateAvailability();
 
 private:
   using Trigger = std_srvs::srv::Trigger;
@@ -35,6 +37,7 @@ private:
   QPushButton * start_button_;
   QPushButton * stop_button_;
   QLabel * status_label_;
+  QTimer * availability_timer_;
   rclcpp::Node::SharedPtr node_;
   rclcpp::Client<Trigger>::SharedPtr start_client_;
   rclcpp::Client<Trigger>::SharedPtr stop_client_;

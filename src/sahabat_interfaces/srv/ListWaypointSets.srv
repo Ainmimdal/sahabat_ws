@@ -1,0 +1,7 @@
+string map_id
+---
+sahabat_interfaces/WaypointSetInfo[] sets
+string active_set_id
+bool has_dock
+sahabat_interfaces/Waypoint dock
+string message

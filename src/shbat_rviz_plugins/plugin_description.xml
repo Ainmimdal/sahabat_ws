@@ -5,4 +5,22 @@
     base_class_type="rviz_common::Panel">
     <description>Start or stop AMCL global relocalization and scan rotation.</description>
   </class>
+  <class
+    name="shbat_rviz_plugins/Sahabat Navigation Status"
+    type="shbat_rviz_plugins::NavigationStatusPanel"
+    base_class_type="rviz_common::Panel">
+    <description>Show Sahabat navigation status, active goal feedback, and key Nav2 runtime parameters.</description>
+  </class>
+  <class
+    name="shbat_rviz_plugins/Sahabat Waypoint Editor"
+    type="shbat_rviz_plugins::WaypointEditorPanel"
+    base_class_type="rviz_common::Panel">
+    <description>Edit Sahabat waypoints directly in RViz.</description>
+  </class>
+  <class
+    name="shbat_rviz_plugins/Sahabat Add Waypoint"
+    type="shbat_rviz_plugins::WaypointEditorTool"
+    base_class_type="rviz_common::Tool">
+    <description>Add and drag Sahabat waypoints on the map.</description>
+  </class>
 </library>

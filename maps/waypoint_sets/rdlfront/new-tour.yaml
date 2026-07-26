@@ -1,0 +1,31 @@
+name: New Tour
+revision: 10
+waypoints:
+- id: '0'
+  name: dock
+  x: 0.356
+  y: -0.66
+  yaw: 0.243
+  dwell_seconds: 0.0
+  enabled: true
+- id: '1'
+  name: exhibit 1
+  x: -0.083
+  y: 2.306
+  yaw: 0.254
+  dwell_seconds: 0.0
+  enabled: true
+- id: '2'
+  name: exhibit 2
+  x: 3.349
+  y: 6.859
+  yaw: 2.615
+  dwell_seconds: 0.0
+  enabled: true
+- id: '3'
+  name: exhibit 3
+  x: 4.854
+  y: 3.208
+  yaw: 1.328
+  dwell_seconds: 0.0
+  enabled: true

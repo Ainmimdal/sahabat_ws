@@ -94,11 +94,17 @@ class OperatorModeManager(Node):
                 'use_hardware:=false',
             ]
         if mode in ('localization', 'operations'):
-            map_stem = self.maps_directory / map_id / 'map'
+            map_stem = self.maps_directory / map_id
             if not map_stem.with_suffix('.yaml').exists():
                 return None
             if mode == 'operations':
-                waypoint_file = self.maps_directory / map_id / 'waypoints.yaml'
+                waypoint_file = self.maps_directory / f'{map_id}_waypoints.yaml'
+                try:
+                    (self.maps_directory / 'last_selected_map').write_text(
+                        f'{map_id}\n', encoding='utf-8'
+                    )
+                except OSError:
+                    pass
                 return [
                     'ros2', 'launch', 'shbat_pkg', 'operations.launch.py',
                     f'map_file:={map_stem}', 'use_rviz:=false',

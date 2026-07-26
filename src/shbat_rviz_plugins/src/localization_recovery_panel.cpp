@@ -15,9 +15,11 @@ LocalizationRecoveryPanel::LocalizationRecoveryPanel(QWidget * parent)
 : rviz_common::Panel(parent),
   start_button_(new QPushButton("Global Relocalize + Rotate")),
   stop_button_(new QPushButton("Stop Rotation")),
-  status_label_(new QLabel("Waiting for localization recovery node..."))
+  status_label_(new QLabel("Waiting for localization recovery node...")),
+  availability_timer_(new QTimer(this))
 {
   status_label_->setWordWrap(true);
+  start_button_->setEnabled(false);
   stop_button_->setEnabled(false);
   auto * layout = new QVBoxLayout;
   layout->addWidget(start_button_);
@@ -29,6 +31,8 @@ LocalizationRecoveryPanel::LocalizationRecoveryPanel(QWidget * parent)
     &LocalizationRecoveryPanel::startRecovery);
   connect(stop_button_, &QPushButton::clicked, this,
     &LocalizationRecoveryPanel::stopRecovery);
+  connect(availability_timer_, &QTimer::timeout, this,
+    &LocalizationRecoveryPanel::updateAvailability);
 }
 
 void LocalizationRecoveryPanel::onInitialize()
@@ -57,7 +61,27 @@ void LocalizationRecoveryPanel::onInitialize()
       QMetaObject::invokeMethod(
         this, [this, status]() {setStatus(status);}, Qt::QueuedConnection);
     });
-  setStatus("Ready. Ensure the robot has room to rotate.");
+  availability_timer_->start(1000);
+  updateAvailability();
+}
+
+void LocalizationRecoveryPanel::updateAvailability()
+{
+  if (!start_client_ || !start_client_->service_is_ready()) {
+    start_button_->setEnabled(false);
+    stop_button_->setEnabled(false);
+    setStatus(
+      "AMCL recovery service unavailable. If this is the SLAM Toolbox "
+      "localization test, use RViz 2D Pose Estimate instead."
+    );
+    return;
+  }
+  if (!stop_button_->isEnabled()) {
+    start_button_->setEnabled(true);
+  }
+  if (status_label_->text().contains("unavailable")) {
+    setStatus("AMCL recovery ready. Ensure the robot has room to rotate.");
+  }
 }
 
 void LocalizationRecoveryPanel::startRecovery()

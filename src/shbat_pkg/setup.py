@@ -32,6 +32,7 @@ setup(
             'launch/navigation.launch.py',
             'launch/operations.launch.py',
             'launch/remote_operations.launch.py',
+            'launch/waypoint_editor.launch.py',
         ]),
         ('share/' + package_name + '/launch/debug', [
             'launch/debug/basic_bringup.launch.py',
@@ -56,9 +57,13 @@ setup(
             'config/collision_monitor_operator.yaml',
             'config/foxglove_operator.yaml',
         ]),
+        ('share/' + package_name + '/behavior_trees', [
+            'behavior_trees/navigate_to_pose_replan_if_path_invalid.xml',
+        ]),
         ('share/' + package_name + '/rviz', [
             'rviz/nav2_test.rviz',
             'rviz/slam_nav.rviz',
+            'rviz/waypoint_editor.rviz',
         ]),
  
     ],
@@ -97,10 +102,13 @@ setup(
             'exhibit_navigator = shbat_pkg.exhibit_navigator:main',
             'operator_backend = shbat_pkg.operator_backend:main',
             'operator_mode_manager = shbat_pkg.operator_mode_manager:main',
+            'slam_toolbox_initial_pose = shbat_pkg.slam_toolbox_initial_pose:main',
             'command_arbiter = shbat_pkg.command_arbiter:main',
             'mobile_gateway = shbat_pkg.mobile_gateway:main',
             'localization_recovery = shbat_pkg.localization_recovery:main',
             'dock_pose_initializer = shbat_pkg.dock_pose_initializer:main',
+            'live_waypoint_editor = shbat_pkg.live_waypoint_editor:main',
+            'continue_mapping_session = shbat_pkg.continue_mapping_session:main',
         ],
     },
 )

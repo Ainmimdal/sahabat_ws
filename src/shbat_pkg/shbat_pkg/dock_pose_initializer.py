@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Initialize AMCL from the named dock waypoint used by operations."""
+"""Initialize saved-map localization from the map's dock pose."""
 
 import math
 import os
+from pathlib import Path
 
 import rclpy
 import yaml
@@ -11,7 +12,7 @@ from rclpy.node import Node
 
 
 class DockPoseInitializer(Node):
-    """Publish the dock waypoint to /initialpose after AMCL has started."""
+    """Publish the dock waypoint to /initialpose after localization starts."""
 
     def __init__(self):
         super().__init__('dock_pose_initializer')
@@ -21,11 +22,17 @@ class DockPoseInitializer(Node):
         )
         self.declare_parameter('dock_name', 'dock')
         self.declare_parameter('startup_delay', 4.0)
+        self.declare_parameter('maps_directory', '~/sahabat_ws/maps')
+        self.declare_parameter('map_id', '')
 
         self.waypoint_file = os.path.expanduser(
             str(self.get_parameter('waypoint_file').value)
         )
         self.dock_name = str(self.get_parameter('dock_name').value)
+        self.maps_directory = Path(
+            str(self.get_parameter('maps_directory').value)
+        ).expanduser()
+        self.map_id = str(self.get_parameter('map_id').value).strip()
         self.publisher = self.create_publisher(
             PoseWithCovarianceStamped, '/initialpose', 10
         )
@@ -36,6 +43,13 @@ class DockPoseInitializer(Node):
         self.publish_timer = None
 
     def load_dock_pose(self):
+        for path in self.dock_candidates():
+            dock = self.read_dock_file(path)
+            if dock is not None:
+                self.get_logger().info(f'Loaded dock pose from {path}')
+                return dock
+
+        # Compatibility fallback for standalone legacy waypoint files.
         try:
             with open(self.waypoint_file, encoding='utf-8') as stream:
                 data = yaml.safe_load(stream) or {}
@@ -66,6 +80,33 @@ class DockPoseInitializer(Node):
         )
         return None
 
+    def dock_candidates(self):
+        if not self.map_id:
+            return []
+        return [
+            self.maps_directory / 'waypoint_sets' / self.map_id / 'dock.yaml',
+            self.maps_directory / self.map_id / 'dock.yaml',
+        ]
+
+    @staticmethod
+    def read_dock_file(path):
+        try:
+            with path.open(encoding='utf-8') as stream:
+                data = yaml.safe_load(stream) or {}
+        except (OSError, yaml.YAMLError):
+            return None
+        dock = data.get('dock') if isinstance(data, dict) else None
+        if not dock:
+            return None
+        try:
+            return (
+                float(dock['x']),
+                float(dock['y']),
+                float(dock['yaw']),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
     def begin_publishing(self):
         self.start_timer.cancel()
         if self.dock_pose is None:
@@ -95,7 +136,7 @@ class DockPoseInitializer(Node):
 
         if self.publish_count == 1:
             self.get_logger().info(
-                f'Initialized AMCL at dock: x={x:.3f}, y={y:.3f}, '
+                f'Initialized localization at dock: x={x:.3f}, y={y:.3f}, '
                 f'yaw={yaw:.3f}'
             )
 

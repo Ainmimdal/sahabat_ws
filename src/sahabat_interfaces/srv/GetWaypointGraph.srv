@@ -1,0 +1,8 @@
+string map_id
+string set_id
+---
+uint64 revision
+sahabat_interfaces/Waypoint[] waypoints
+sahabat_interfaces/RouteSegment[] segments
+string set_id
+string message

@@ -1,0 +1,15 @@
+uint8 CREATE=0
+uint8 RENAME=1
+uint8 DELETE=2
+uint8 SELECT=3
+
+uint8 action
+string map_id
+string set_id
+string name
+string lease_id
+---
+bool success
+string set_id
+string active_set_id
+string message

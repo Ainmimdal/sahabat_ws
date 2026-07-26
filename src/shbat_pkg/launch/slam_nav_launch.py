@@ -26,9 +26,11 @@ What this launches:
 """
 
 import os
+from pathlib import Path
+
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node, ComposableNodeContainer
@@ -63,62 +65,113 @@ except Exception as e:
     print(f"[slam_nav_launch] Could not load saved pose: {e}")
 
 
+def _read_dock_pose(path):
+    try:
+        with path.open(encoding='utf-8') as stream:
+            data = yaml.safe_load(stream) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    dock = data.get('dock') if isinstance(data, dict) else None
+    if not dock:
+        return None
+    try:
+        return [float(dock['x']), float(dock['y']), float(dock['yaw'])]
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def load_dock_pose(maps_directory, map_id):
+    if not map_id:
+        return None
+    candidates = [
+        maps_directory / 'waypoint_sets' / map_id / 'dock.yaml',
+        maps_directory / map_id / 'dock.yaml',
+    ]
+    for path in candidates:
+        pose = _read_dock_pose(path)
+        if pose is not None:
+            return pose
+    return None
+
+
 def generate_launch_description():
-    
+
     pkg_name = 'shbat_pkg'
     pkg_share = get_package_share_directory(pkg_name)
-    
+
     # ========== Launch Arguments ==========
-    
+
     mode_arg = DeclareLaunchArgument(
         'mode',
         default_value='mapping',
         description='SLAM mode: mapping or localization'
     )
     mode = LaunchConfiguration('mode')
-    
+
     map_file_arg = DeclareLaunchArgument(
         'map_file',
         default_value='',
         description='Path to map file for localization (without extension)'
     )
     map_file = LaunchConfiguration('map_file')
-    
+
+    maps_directory_arg = DeclareLaunchArgument(
+        'maps_directory',
+        default_value='~/sahabat_ws/maps',
+        description='Directory containing saved maps and waypoint sets'
+    )
+    maps_directory = LaunchConfiguration('maps_directory')
+
+    map_id_arg = DeclareLaunchArgument(
+        'map_id',
+        default_value='',
+        description='Saved map file stem, e.g. rdlfront'
+    )
+    map_id = LaunchConfiguration('map_id')
+
     use_lidar_arg = DeclareLaunchArgument(
         'use_lidar',
         default_value='true' if lidar_port else 'false',
         description='Enable LIDAR'
     )
     use_lidar = LaunchConfiguration('use_lidar')
-    
+
     use_imu_arg = DeclareLaunchArgument(
         'use_imu',
         default_value='true' if imu_port else 'false',
         description='Enable IMU'
     )
     use_imu = LaunchConfiguration('use_imu')
-    
+
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
         default_value='true',
         description='Launch RViz'
     )
     use_rviz = LaunchConfiguration('use_rviz')
-    
+
     use_foxglove_arg = DeclareLaunchArgument(
         'use_foxglove',
         default_value='false',
         description='Launch Foxglove bridge for remote visualization'
     )
     use_foxglove = LaunchConfiguration('use_foxglove')
-    
+
     use_zed_arg = DeclareLaunchArgument(
         'use_zed',
         default_value='false',
-        description='Enable ZED camera for obstacle detection (depth to laserscan)'
+        description='Enable ZED camera for obstacle detection (PointCloud2 to VoxelLayer)'
     )
     use_zed = LaunchConfiguration('use_zed')
-    
+
+    localization_backend_arg = DeclareLaunchArgument(
+        'localization_backend',
+        default_value='amcl',
+        choices=['amcl', 'slam_toolbox'],
+        description='Saved-map localization backend in localization mode'
+    )
+    localization_backend = LaunchConfiguration('localization_backend')
+
     use_api_arg = DeclareLaunchArgument(
         'use_api',
         default_value='false',
@@ -132,6 +185,13 @@ def generate_launch_description():
         description='Open the simple map naming and saving panel'
     )
     use_mapping_panel = LaunchConfiguration('use_mapping_panel')
+
+    continue_mapping_arg = DeclareLaunchArgument(
+        'continue_mapping',
+        default_value='false',
+        description='In mapping mode, load the posegraph named by map_file at startup'
+    )
+    continue_mapping = LaunchConfiguration('continue_mapping')
 
     joy_cmd_topic_arg = DeclareLaunchArgument(
         'joy_cmd_topic',
@@ -178,35 +238,35 @@ def generate_launch_description():
         description='Initial X position for localization (auto-loaded from saved pose)'
     )
     initial_pose_x = LaunchConfiguration('initial_pose_x')
-    
+
     initial_pose_y_arg = DeclareLaunchArgument(
         'initial_pose_y',
         default_value=str(saved_pose.get('initial_pose_y', 0.0)),
         description='Initial Y position for localization (auto-loaded from saved pose)'
     )
     initial_pose_y = LaunchConfiguration('initial_pose_y')
-    
+
     initial_pose_yaw_arg = DeclareLaunchArgument(
         'initial_pose_yaw',
         default_value=str(saved_pose.get('initial_pose_yaw', 0.0)),
         description='Initial yaw (radians) for localization (auto-loaded from saved pose)'
     )
     initial_pose_yaw = LaunchConfiguration('initial_pose_yaw')
-    
+
     motor_port_arg = DeclareLaunchArgument(
         'motor_port',
         default_value=motor_port if motor_port else '/dev/ttyUSB0',
         description='Motor controller serial port'
     )
     motor_port_cfg = LaunchConfiguration('motor_port')
-    
+
     lidar_port_arg = DeclareLaunchArgument(
         'lidar_port',
         default_value=lidar_port if lidar_port else '/dev/ttyUSB1',
         description='LIDAR serial port'
     )
     lidar_port_cfg = LaunchConfiguration('lidar_port')
-    
+
     imu_port_arg = DeclareLaunchArgument(
         'imu_port',
         default_value=imu_port if imu_port else '/dev/ttyUSB2',
@@ -215,13 +275,13 @@ def generate_launch_description():
     imu_port_cfg = LaunchConfiguration('imu_port')
 
     # ========== Robot Description (URDF) ==========
-    
+
     # Use ZED URDF when use_zed is enabled (includes ZED camera frames)
     # Note: We need to process this at launch time based on use_zed arg
     # For simplicity, we'll use the non-ZED URDF and add ZED TF via static publisher
     xacro_file = os.path.join(pkg_share, 'urdf', 'sahabat_robot.urdf.xacro')
     robot_description = xacro.process_file(xacro_file).toxml()
-    
+
     robot_state_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -230,7 +290,7 @@ def generate_launch_description():
         parameters=[{'robot_description': robot_description}],
         condition=IfCondition(use_hardware)
     )
-    
+
     joint_state_publisher = Node(
         package='joint_state_publisher',
         executable='joint_state_publisher',
@@ -240,7 +300,7 @@ def generate_launch_description():
     )
 
     # ========== Base Controller ==========
-    
+
     base_controller = Node(
         package='shbat_pkg',
         executable='base_controller',
@@ -257,7 +317,7 @@ def generate_launch_description():
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
             {'decel_time_ms': 200},
-            {'max_linear_vel': 0.5},
+            {'max_linear_vel': 0.5},     # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
             {'odom_rate': 20.0},
@@ -266,7 +326,7 @@ def generate_launch_description():
     )
 
     # ========== LIDAR ==========
-    
+
     lidar_node = Node(
         package='rplidar_ros',
         executable='rplidar_node',
@@ -289,7 +349,7 @@ def generate_launch_description():
         remappings=[('scan', 'scan_raw')],  # Route through scan_filter
         condition=hardware_and(use_lidar)
     )
-    
+
     scan_filter_config = os.path.join(pkg_share, 'config', 'scan_filter.yaml')
     scan_filter_node = Node(
         package='shbat_pkg',
@@ -301,7 +361,7 @@ def generate_launch_description():
     )
 
     # ========== IMU ==========
-    
+
     imu_node = Node(
         package='witmotion_ros2',
         executable='witmotion_ros2',
@@ -319,15 +379,13 @@ def generate_launch_description():
     )
 
     # ========== ZED Camera (Obstacle Detection) ==========
-    
-    zed_depth_config = os.path.join(pkg_share, 'config', 'zed_depth_to_scan.yaml')
-    
+
     # ZED common config
     zed_config_common = os.path.join(
         get_package_share_directory('zed_wrapper'), 'config', 'common_stereo.yaml')
     zed_config_camera = os.path.join(
         get_package_share_directory('zed_wrapper'), 'config', 'zed2i.yaml')
-    
+
     # Static transform: base_link -> zed_camera_link
     # Adjust these values based on where ZED is mounted on your robot!
     # x=forward, y=left, z=up (in meters)
@@ -349,7 +407,7 @@ def generate_launch_description():
             '--child-frame-id', 'zed2i_camera_link',  # Match ZED camera_name
         ],
     )
-    
+
     # ZED Wrapper component
     # Position tracking disabled - we use our own EKF for odometry
     # Internal camera TFs will be published via additional static transforms below
@@ -385,7 +443,7 @@ def generate_launch_description():
         ],
         extra_arguments=[{'use_intra_process_comms': True}]
     )
-    
+
     # ZED internal camera TFs (since pos_tracking is disabled, ZED won't publish these)
     # These are the transforms from zed_camera_link to the optical frames
     # Values from ZED 2i specs: left camera is 6cm from center
@@ -405,7 +463,7 @@ def generate_launch_description():
             '--child-frame-id', 'zed2i_left_camera_frame',
         ],
     )
-    
+
     # Optical frame has different orientation (Z forward, X right, Y down)
     zed_left_optical_tf = Node(
         condition=hardware_and(use_zed),
@@ -423,7 +481,7 @@ def generate_launch_description():
             '--child-frame-id', 'zed2i_left_camera_optical_frame',
         ],
     )
-    
+
     # Container for ZED components (just ZED wrapper, pointcloud goes directly to costmap)
     zed_container = ComposableNodeContainer(
         condition=hardware_and(use_zed),
@@ -439,7 +497,7 @@ def generate_launch_description():
     )
 
     # ========== EKF Sensor Fusion ==========
-    
+
     ekf_config = os.path.join(pkg_share, 'config', 'ekf.yaml')
     ekf_node = Node(
         package='robot_localization',
@@ -454,23 +512,55 @@ def generate_launch_description():
     )
 
     # ========== SLAM Toolbox (Mapping Mode Only) ==========
-    
+
     slam_config_mapping = os.path.join(pkg_share, 'config', 'slam_toolbox.yaml')
-    
-    # Mapping mode - use slam_toolbox
+
+    # Mapping mode - use slam_toolbox. Continuing a saved session is loaded at
+    # node startup because post-start deserialize can block on large graphs.
     slam_toolbox_mapping = Node(
         package='slam_toolbox',
         executable='async_slam_toolbox_node',
         name='slam_toolbox',
         output='screen',
         parameters=[slam_config_mapping],
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'mapping'"]))
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'mapping' and '",
+            continue_mapping, "' != 'true'"
+        ]))
     )
-    
-    # ========== AMCL + Map Server (Localization Mode) ==========
-    
+
+    def continue_mapping_setup(context, *_args, **_kwargs):
+        if mode.perform(context) != 'mapping':
+            return []
+        if continue_mapping.perform(context).lower() != 'true':
+            return []
+        return [Node(
+            package='slam_toolbox',
+            executable='async_slam_toolbox_node',
+            name='slam_toolbox',
+            output='screen',
+            parameters=[
+                slam_config_mapping,
+                {
+                    'map_file_name': map_file.perform(context),
+                    'map_start_pose': [
+                        float(initial_pose_x.perform(context)),
+                        float(initial_pose_y.perform(context)),
+                        float(initial_pose_yaw.perform(context)),
+                    ],
+                    'map_start_at_dock': False,
+                },
+            ],
+        )]
+
+    slam_toolbox_continue_mapping = OpaqueFunction(
+        function=continue_mapping_setup
+    )
+
+    # ========== Saved-map Localization ==========
+
     amcl_config = os.path.join(pkg_share, 'config', 'amcl.yaml')
-    
+
     # Map server - serves the saved map
     map_server = Node(
         package='nav2_map_server',
@@ -481,9 +571,12 @@ def generate_launch_description():
             amcl_config,
             {'yaml_filename': [map_file, '.yaml']}
         ],
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"]))
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'localization' and '",
+            localization_backend, "' == 'amcl'"
+        ]))
     )
-    
+
     # AMCL - Adaptive Monte Carlo Localization (supports 2D Pose Estimate!)
     amcl_node = Node(
         package='nav2_amcl',
@@ -506,9 +599,12 @@ def generate_launch_description():
         remappings=[
             ('scan', '/scan')
         ],
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"]))
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'localization' and '",
+            localization_backend, "' == 'amcl'"
+        ]))
     )
-    
+
     # Lifecycle manager for map_server and amcl
     lifecycle_manager_localization = Node(
         package='nav2_lifecycle_manager',
@@ -520,11 +616,110 @@ def generate_launch_description():
             'use_sim_time': False,
             'node_names': ['map_server', 'amcl']
         }],
-        condition=IfCondition(PythonExpression(["'", mode, "' == 'localization'"]))
+        condition=IfCondition(PythonExpression([
+            "'", mode, "' == 'localization' and '",
+            localization_backend, "' == 'amcl'"
+        ]))
+    )
+
+    slam_config_localization = os.path.join(
+        pkg_share, 'config', 'slam_toolbox_localization.yaml'
+    )
+
+    def resolve_slam_localization_setup(context, *_args, **_kwargs):
+        if mode.perform(context) != 'localization':
+            return []
+        if localization_backend.perform(context) != 'slam_toolbox':
+            return []
+
+        raw_map = Path(map_file.perform(context)).expanduser()
+        maps_dir = Path(maps_directory.perform(context)).expanduser()
+        resolved_map_id = map_id.perform(context).strip()
+        if not resolved_map_id and raw_map.name:
+            resolved_map_id = raw_map.stem
+        candidates = []
+        if raw_map.suffix in ('.yaml', '.pgm', '.posegraph', '.data'):
+            candidates.append(raw_map.with_suffix(''))
+        candidates.append(raw_map)
+        if raw_map.is_dir():
+            candidates.insert(0, raw_map / 'session')
+            candidates.append(raw_map / 'map')
+
+        map_stem = None
+        for candidate in candidates:
+            if (
+                candidate.with_suffix('.posegraph').exists()
+                and candidate.with_suffix('.data').exists()
+            ):
+                map_stem = candidate
+                break
+
+        if map_stem is None:
+            checked = ', '.join(str(path) for path in candidates)
+            raise RuntimeError(
+                'SLAM Toolbox localization needs serialized map files '
+                '(.posegraph and .data). Checked stems: ' + checked
+            )
+
+        use_saved_pose = use_saved_initial_pose.perform(context).lower() in (
+            'true', '1', 'yes', 'on'
+        )
+        overrides = {'map_file_name': str(map_stem)}
+        if use_saved_pose:
+            overrides.update({
+                'map_start_at_dock': False,
+                'map_start_pose': [
+                    float(initial_pose_x.perform(context)),
+                    float(initial_pose_y.perform(context)),
+                    float(initial_pose_yaw.perform(context)),
+                ],
+            })
+        else:
+            dock_pose = load_dock_pose(maps_dir, resolved_map_id)
+            if dock_pose is not None:
+                overrides.update({
+                    'map_start_at_dock': False,
+                    'map_start_pose': dock_pose,
+                })
+                print(
+                    '[slam_nav_launch] Auto-initializing SLAM Toolbox from '
+                    f'dock pose for {resolved_map_id}: {dock_pose}'
+                )
+            else:
+                overrides['map_start_at_dock'] = True
+                print(
+                    '[slam_nav_launch] No dock pose found for '
+                    f'{resolved_map_id}; SLAM Toolbox will use the serialized '
+                    'session start and may need RViz 2D Pose Estimate.'
+                )
+
+        print(
+            '[slam_nav_launch] Using SLAM Toolbox localization map stem: '
+            f'{map_stem}'
+        )
+        return [
+            Node(
+                package='slam_toolbox',
+                executable='localization_slam_toolbox_node',
+                name='slam_toolbox',
+                output='screen',
+                parameters=[slam_config_localization, overrides],
+            ),
+            Node(
+                package='shbat_pkg',
+                executable='slam_toolbox_initial_pose',
+                name='slam_toolbox_initial_pose',
+                output='screen',
+                parameters=[{'map_file_name': str(map_stem)}],
+            ),
+        ]
+
+    slam_toolbox_localization = OpaqueFunction(
+        function=resolve_slam_localization_setup
     )
 
     # ========== Joystick Control ==========
-    
+
     joy_node = Node(
         package='joy',
         executable='joy_node',
@@ -532,7 +727,7 @@ def generate_launch_description():
         output='screen',
         condition=IfCondition(use_hardware)
     )
-    
+
     joy2cmd = Node(
         package='shbat_pkg',
         executable='joy2cmd',
@@ -554,9 +749,14 @@ def generate_launch_description():
     )
 
     # ========== Nav2 Stack ==========
-    
+
     nav2_config = os.path.join(pkg_share, 'config', 'nav2_odom_only.yaml')
-    
+    nav_to_pose_bt = os.path.join(
+        pkg_share,
+        'behavior_trees',
+        'navigate_to_pose_replan_if_path_invalid.xml',
+    )
+
     nav2_lifecycle_nodes = [
         'controller_server',
         'planner_server',
@@ -566,7 +766,7 @@ def generate_launch_description():
         'waypoint_follower',
         'velocity_smoother',
     ]
-    
+
     nav2_controller = Node(
         package='nav2_controller',
         executable='controller_server',
@@ -575,7 +775,7 @@ def generate_launch_description():
         parameters=[nav2_config],
         remappings=[('cmd_vel', 'cmd_vel_nav')]
     )
-    
+
     nav2_planner = Node(
         package='nav2_planner',
         executable='planner_server',
@@ -583,7 +783,7 @@ def generate_launch_description():
         output='screen',
         parameters=[nav2_config]
     )
-    
+
     nav2_smoother = Node(
         package='nav2_smoother',
         executable='smoother_server',
@@ -591,7 +791,7 @@ def generate_launch_description():
         output='screen',
         parameters=[nav2_config]
     )
-    
+
     nav2_behaviors = Node(
         package='nav2_behaviors',
         executable='behavior_server',
@@ -599,15 +799,18 @@ def generate_launch_description():
         output='screen',
         parameters=[nav2_config]
     )
-    
+
     nav2_bt_navigator = Node(
         package='nav2_bt_navigator',
         executable='bt_navigator',
         name='bt_navigator',
         output='screen',
-        parameters=[nav2_config]
+        parameters=[
+            nav2_config,
+            {'default_nav_to_pose_bt_xml': nav_to_pose_bt},
+        ]
     )
-    
+
     nav2_waypoint_follower = Node(
         package='nav2_waypoint_follower',
         executable='waypoint_follower',
@@ -615,7 +818,7 @@ def generate_launch_description():
         output='screen',
         parameters=[nav2_config]
     )
-    
+
     nav2_velocity_smoother = Node(
         package='nav2_velocity_smoother',
         executable='velocity_smoother',
@@ -627,7 +830,7 @@ def generate_launch_description():
             ('cmd_vel_smoothed', smoothed_cmd_topic)
         ]
     )
-    
+
     nav2_lifecycle_manager = Node(
         package='nav2_lifecycle_manager',
         executable='lifecycle_manager',
@@ -642,11 +845,11 @@ def generate_launch_description():
     )
 
     # ========== RViz ==========
-    
+
     rviz_config = os.path.join(pkg_share, 'rviz', 'slam_nav.rviz')
     if not os.path.exists(rviz_config):
         rviz_config = ''
-    
+
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -668,7 +871,7 @@ def generate_launch_description():
     )
 
     # ========== Foxglove Bridge (for remote visualization) ==========
-    
+
     foxglove_bridge = Node(
         package='foxglove_bridge',
         executable='foxglove_bridge',
@@ -696,7 +899,7 @@ def generate_launch_description():
     # ========== Auto Pose Saver ==========
     # Runs in background, saves pose whenever you use 2D Pose Estimate in RViz
     # Next launch will automatically use the saved pose
-    
+
     auto_pose_saver = Node(
         package='shbat_pkg',
         executable='pose_saver_auto',
@@ -709,18 +912,22 @@ def generate_launch_description():
     )
 
     # ========== Return Launch Description ==========
-    
+
     return LaunchDescription([
         # Arguments
         mode_arg,
         map_file_arg,
+        maps_directory_arg,
+        map_id_arg,
         use_lidar_arg,
         use_imu_arg,
         use_rviz_arg,
         use_foxglove_arg,
         use_zed_arg,
+        localization_backend_arg,
         use_api_arg,
         use_mapping_panel_arg,
+        continue_mapping_arg,
         joy_cmd_topic_arg,
         smoothed_cmd_topic_arg,
         operator_safety_arg,
@@ -732,43 +939,45 @@ def generate_launch_description():
         initial_pose_x_arg,
         initial_pose_y_arg,
         initial_pose_yaw_arg,
-        
+
         # Robot description
         robot_state_publisher,
         joint_state_publisher,
-        
+
         # Sensors
         lidar_node,
         scan_filter_node,
         imu_node,
-        
+
         # ZED Camera (obstacle detection)
         zed_static_tf,
         zed_left_camera_tf,
         zed_left_optical_tf,
         zed_container,
-        
+
         # Motor controller
         base_controller,
-        
+
         # EKF
         ekf_node,
-        
+
         # SLAM Toolbox (mapping mode only)
         slam_toolbox_mapping,
-        
-        # AMCL + Map Server (localization mode only)
+        slam_toolbox_continue_mapping,
+
+        # Saved-map localization mode
         map_server,
         amcl_node,
         lifecycle_manager_localization,
-        
+        slam_toolbox_localization,
+
         # Auto pose saver (localization mode only)
         auto_pose_saver,
-        
+
         # Joystick
         joy_node,
         joy2cmd,
-        
+
         # Nav2 stack
         nav2_controller,
         nav2_planner,
@@ -778,11 +987,11 @@ def generate_launch_description():
         nav2_waypoint_follower,
         nav2_velocity_smoother,
         nav2_lifecycle_manager,
-        
+
         # RViz
         rviz_node,
         mapping_panel,
-        
+
         # Foxglove (remote visualization)
         foxglove_bridge,
         api_bridge,

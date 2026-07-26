@@ -4,7 +4,7 @@ The extension provides a three-column Drive, Maps, and Routes workspace with a
 compact status strip and localization recovery row. Hardware stays available
 in Idle, so teleoperation does not require starting mapping or loading a map.
 It includes lease-aware WASD/gamepad teleoperation, named map management,
-map-specific dock and waypoint editing, patrol controls, diagnostics, and
+map-specific dock and named waypoint-set editing, patrol controls, diagnostics, and
 automatic AMCL global relocalization. The robot-side bridge must be started
 with `remote_operations.launch.py`.
 
@@ -23,6 +23,10 @@ Import the layouts from `foxglove/layouts`. Each layout opens the operator
 panel on the relevant view. Opening a saved map uses full **Operate** mode so
 localization recovery, map-specific routes, and dock initialization are
 available together.
+
+Each saved map can own several named waypoint sets. Select a set before editing
+or patrolling; the same active set and data are used by the RViz Waypoint
+Manager. The dock is stored once for the map and is not repeated in each set.
 
 The `.foxe` file is a distribution archive and is not opened as a data file in
 Foxglove. For an unpublished local extension, use the commands above; the

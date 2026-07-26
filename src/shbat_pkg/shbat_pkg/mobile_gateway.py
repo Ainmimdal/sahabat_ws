@@ -181,6 +181,7 @@ class MobileGateway(Node):
             waypoint.enabled = True
             request = SaveWaypoints.Request()
             request.map_id = self.active_map
+            request.set_id = current.set_id
             request.expected_revision = current.revision
             request.waypoints = list(current.waypoints) + [waypoint]
             request.lease_id = str(data.get('lease_id', ''))

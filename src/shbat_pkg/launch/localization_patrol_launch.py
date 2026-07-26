@@ -50,6 +50,20 @@ def generate_launch_description():
         description='Path to map file (without .yaml extension)'
     )
     map_file = LaunchConfiguration('map_file')
+
+    maps_directory_arg = DeclareLaunchArgument(
+        'maps_directory',
+        default_value='~/sahabat_ws/maps',
+        description='Directory containing saved maps and waypoint sets',
+    )
+    maps_directory = LaunchConfiguration('maps_directory')
+
+    map_id_arg = DeclareLaunchArgument(
+        'map_id',
+        default_value='',
+        description='Saved map file stem, e.g. rdlfront',
+    )
+    map_id = LaunchConfiguration('map_id')
     
     use_zed_arg = DeclareLaunchArgument(
         'use_zed',
@@ -57,6 +71,14 @@ def generate_launch_description():
         description='Enable ZED camera for obstacle detection (PointCloud to costmap)'
     )
     use_zed = LaunchConfiguration('use_zed')
+
+    localization_backend_arg = DeclareLaunchArgument(
+        'localization_backend',
+        default_value='amcl',
+        choices=['amcl', 'slam_toolbox'],
+        description='Use AMCL or SLAM Toolbox for saved-map localization',
+    )
+    localization_backend = LaunchConfiguration('localization_backend')
     
     use_rviz_arg = DeclareLaunchArgument(
         'use_rviz',
@@ -142,10 +164,10 @@ def generate_launch_description():
     # Waypoint file
     waypoint_file_arg = DeclareLaunchArgument(
         'waypoint_file',
-        default_value=os.path.expanduser(
-            '~/sahabat_ws/src/shbat_pkg/config/patrol_waypoints.yaml'
-        ),
-        description='Path to waypoint patrol file'
+        default_value=PythonExpression([
+            "'", map_file, "'.rsplit('/', 1)[0] + '/waypoints.yaml'"
+        ]),
+        description='Legacy waypoint path; its directory owns waypoint sets'
     )
     waypoint_file = LaunchConfiguration('waypoint_file')
     
@@ -158,7 +180,10 @@ def generate_launch_description():
         launch_arguments={
             'mode': 'localization',
             'map_file': map_file,
+            'maps_directory': maps_directory,
+            'map_id': map_id,
             'use_zed': use_zed,
+            'localization_backend': localization_backend,
             'use_rviz': use_rviz,
             'use_foxglove': use_foxglove,
             'initial_pose_x': initial_pose_x,
@@ -210,19 +235,26 @@ def generate_launch_description():
     )
 
     localization_recovery = Node(
-        package='shbat_pkg',
-        executable='localization_recovery',
-        name='localization_recovery',
-        output='screen',
-        parameters=[{'cmd_vel_topic': recovery_cmd_topic}],
-    )
+            package='shbat_pkg',
+            executable='localization_recovery',
+            name='localization_recovery',
+            output='screen',
+            parameters=[{'cmd_vel_topic': recovery_cmd_topic}],
+            condition=IfCondition(PythonExpression([
+                "'", localization_backend, "' == 'amcl'"
+            ])),
+        )
 
     dock_pose_initializer = Node(
         package='shbat_pkg',
         executable='dock_pose_initializer',
         name='dock_pose_initializer',
         output='screen',
-        parameters=[{'waypoint_file': waypoint_file}],
+        parameters=[{
+            'waypoint_file': waypoint_file,
+            'maps_directory': maps_directory,
+            'map_id': map_id,
+        }],
         condition=IfCondition(initialize_from_dock),
     )
     
@@ -231,7 +263,10 @@ def generate_launch_description():
     return LaunchDescription([
         # Arguments
         map_file_arg,
+        maps_directory_arg,
+        map_id_arg,
         use_zed_arg,
+        localization_backend_arg,
         use_rviz_arg,
         use_foxglove_arg,
         use_api_arg,

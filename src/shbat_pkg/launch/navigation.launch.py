@@ -22,12 +22,17 @@ def generate_launch_description():
     use_ekf = LaunchConfiguration('use_ekf')
     use_rviz = LaunchConfiguration('use_rviz')
     use_zed = LaunchConfiguration('use_zed')
+    localization_backend = LaunchConfiguration('localization_backend')
+    continue_mapping = LaunchConfiguration('continue_mapping')
     use_foxglove = LaunchConfiguration('use_foxglove')
     use_mapping_panel = LaunchConfiguration('use_mapping_panel')
     joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
     smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
     operator_safety = LaunchConfiguration('operator_safety')
     use_hardware = LaunchConfiguration('use_hardware')
+    initial_pose_x = LaunchConfiguration('initial_pose_x')
+    initial_pose_y = LaunchConfiguration('initial_pose_y')
+    initial_pose_yaw = LaunchConfiguration('initial_pose_yaw')
 
     arguments = [
         DeclareLaunchArgument(
@@ -39,12 +44,22 @@ def generate_launch_description():
         DeclareLaunchArgument('use_ekf', default_value='true'),
         DeclareLaunchArgument('use_rviz', default_value='true'),
         DeclareLaunchArgument('use_zed', default_value='false'),
+        DeclareLaunchArgument(
+            'localization_backend',
+            default_value='amcl',
+            choices=['amcl', 'slam_toolbox'],
+            description='Saved-map localization backend for localization mode',
+        ),
+        DeclareLaunchArgument('continue_mapping', default_value='false'),
         DeclareLaunchArgument('use_foxglove', default_value='false'),
         DeclareLaunchArgument('use_mapping_panel', default_value='true'),
         DeclareLaunchArgument('joy_cmd_topic', default_value='cmd_vel'),
         DeclareLaunchArgument('smoothed_cmd_topic', default_value='cmd_vel'),
         DeclareLaunchArgument('operator_safety', default_value='false'),
         DeclareLaunchArgument('use_hardware', default_value='true'),
+        DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_y', default_value='0.0'),
+        DeclareLaunchArgument('initial_pose_yaw', default_value='0.0'),
     ]
 
     odom_only = IncludeLaunchDescription(
@@ -67,12 +82,17 @@ def generate_launch_description():
             'map_file': map_file,
             'use_rviz': use_rviz,
             'use_zed': use_zed,
+            'localization_backend': localization_backend,
+            'continue_mapping': continue_mapping,
             'use_foxglove': use_foxglove,
             'use_mapping_panel': use_mapping_panel,
             'joy_cmd_topic': joy_cmd_topic,
             'smoothed_cmd_topic': smoothed_cmd_topic,
             'operator_safety': operator_safety,
             'use_hardware': use_hardware,
+            'initial_pose_x': initial_pose_x,
+            'initial_pose_y': initial_pose_y,
+            'initial_pose_yaw': initial_pose_yaw,
         }.items(),
         condition=IfCondition(
             PythonExpression(["'", mode, "' != 'odom_only'"])

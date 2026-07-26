@@ -1,0 +1,11 @@
+string map_id
+string set_id
+uint64 expected_revision
+sahabat_interfaces/Waypoint[] waypoints
+sahabat_interfaces/RouteSegment[] segments
+string lease_id
+---
+bool success
+uint64 revision
+string set_id
+string message

@@ -116,6 +116,34 @@ ros2 run tf2_ros tf2_echo odom base_link
 Before sending a navigation goal, confirm that the scan aligns with walls,
 odometry moves in the correct direction, and the emergency stop latches.
 
+### Known-good Nav2 motion baseline
+
+The following values in `config/nav2_odom_only.yaml` produced good supervised
+motion on June 20, 2026 and are the rollback point for future tuning:
+
+- 0.3 m/s linear cruise with a 0.5 m/s command cap
+- 0.5 rad/s angular cap for 10 Hz lidar alignment
+- 0.5 m lookahead with a 0.3-0.9 m adaptive range
+- 0.3 rad rotate-to-heading threshold
+- 30 Hz velocity smoothing, 0.6 m/s² linear acceleration, and 0.5 m/s² normal
+  deceleration
+
+This combination reduced curve overshoot and abrupt normal stopping without
+reintroducing the low-angular-command drivetrain deadlock.
+
+After changing Nav2 speed or controller tuning, use a clear straight test lane
+with a person beside the emergency stop. Start with a short goal at 0.2 m/s,
+then repeat at the configured 0.3 m/s cruise before allowing the 0.5 m/s
+command cap. Test a wide 90-degree turn separately and confirm the lidar scan
+stays aligned with walls. Stop the test if wheel odometry jumps, the scan
+smears, the controller oscillates, or stopping distance is unsafe. Keep angular
+velocity at or below
+0.5 rad/s until a higher rate passes a logged lidar/localization test.
+During the turn test, small heading corrections should form a continuous arc;
+larger initial heading errors may cause an in-place pivot. Stop and
+retune if navigation repeatedly alternates between pivoting, creeping forward,
+and braking.
+
 ## LIDAR-only diagnostics
 
 Stop other robot launches first so only one process opens the serial port. Find

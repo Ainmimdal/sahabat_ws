@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.1
+
+- Add **Go to dock** in Foxglove and the RViz Waypoint Manager.
+- Allow switching sets after navigation reaches the `complete` state.
+- Show explicit saved/unsaved state and confirmation after saving.
+- Clarify **New set**, **Save changes**, immediate set loading, and discard prompts.
+
+## 0.3.0
+
+- Add multiple named waypoint sets per saved map.
+- Share the active set, ordering, revisions, and waypoint data with RViz.
+- Store the localization dock once per map instead of inside every patrol set.
+- Redesign Routes around a compact set selector, dock summary, and focused editing actions.
+
 ## 0.2.4
 
 - Save current-pose and dock waypoints from `map -> base_link`, matching RViz.

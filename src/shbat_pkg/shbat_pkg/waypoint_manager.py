@@ -26,7 +26,10 @@ import threading
 import yaml
 import os
 import math
+import uuid
 from enum import Enum
+
+from .waypoint_store import WaypointStore
 
 
 class PatrolState(Enum):
@@ -46,6 +49,8 @@ class WaypointManager(Node):
         self.state = PatrolState.IDLE
         self.loop_mode = True
         self.goal_handle = None
+        self.cancel_requested = False
+        self.patrol_indices = []
         
         # Parameters. Keep the historical path as the default so existing
         # commands behave exactly as before, while launches can now select an
@@ -57,6 +62,11 @@ class WaypointManager(Node):
         self.waypoint_file = os.path.expanduser(
             self.get_parameter('waypoint_file').value
         )
+        self.store = WaypointStore(os.path.dirname(self.waypoint_file))
+        self.waypoint_sets = []
+        self.active_set_id = ''
+        self.revision = 0
+        self.dock = None
         
         # Mode: True = add waypoints, False = navigate
         self.add_mode = True
@@ -144,10 +154,13 @@ class WaypointManager(Node):
     def add_waypoint_at(self, x, y, yaw):
         """Add a waypoint at the given position"""
         waypoint = {
+            'id': uuid.uuid4().hex,
             'name': f'waypoint_{len(self.waypoints) + 1}',
             'x': round(x, 3),
             'y': round(y, 3),
-            'yaw': round(yaw, 3)
+            'yaw': round(yaw, 3),
+            'dwell_seconds': 0.0,
+            'enabled': True,
         }
         
         self.waypoints.append(waypoint)
@@ -235,6 +248,9 @@ class WaypointManager(Node):
         """Navigate to a specific waypoint"""
         if not self.waypoints or index >= len(self.waypoints):
             return False
+        if not self.waypoints[index].get('enabled', True):
+            self.get_logger().warning('Selected waypoint is disabled')
+            return False
         
         if not self.nav_client.wait_for_server(timeout_sec=2.0):
             self.get_logger().error('Navigation server not available')
@@ -243,6 +259,7 @@ class WaypointManager(Node):
         
         wp = self.waypoints[index]
         self.current_index = index
+        self.cancel_requested = False
         
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = 'map'
@@ -272,6 +289,10 @@ class WaypointManager(Node):
             self.state = PatrolState.IDLE
             self.gui_callback('update_status')
             return
+        if self.cancel_requested or self.state == PatrolState.IDLE:
+            self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
+            return
         
         result_future = self.goal_handle.get_result_async()
         result_future.add_done_callback(self.goal_result_callback)
@@ -288,19 +309,23 @@ class WaypointManager(Node):
             self.get_logger().info(f'Reached waypoint {self.current_index + 1}')
             
             # Move to next waypoint
-            next_index = self.current_index + 1
-            
-            if next_index >= len(self.waypoints):
+            try:
+                patrol_position = self.patrol_indices.index(self.current_index)
+            except ValueError:
+                patrol_position = -1
+            next_position = patrol_position + 1
+
+            if next_position >= len(self.patrol_indices):
                 if self.loop_mode:
-                    next_index = 0
+                    next_position = 0
                     self.get_logger().info('Looping back to start')
                 else:
                     self.get_logger().info('Patrol complete')
                     self.state = PatrolState.IDLE
                     self.gui_callback('update_status')
                     return
-            
-            self.navigate_to_waypoint(next_index)
+
+            self.navigate_to_waypoint(self.patrol_indices[next_position])
         else:
             # Single waypoint navigation (Go To Selected) - just stop
             self.get_logger().info(f'Reached waypoint {self.current_index + 1}')
@@ -310,20 +335,26 @@ class WaypointManager(Node):
 
     def start_patrol(self):
         """Start patrolling waypoints"""
-        if not self.waypoints:
+        self.patrol_indices = [
+            index for index, waypoint in enumerate(self.waypoints)
+            if waypoint.get('enabled', True)
+        ]
+        if not self.patrol_indices:
             self.get_logger().warn('No waypoints to patrol')
             return False
         
         self.state = PatrolState.RUNNING
-        self.current_index = 0
-        self.navigate_to_waypoint(0)
+        self.current_index = self.patrol_indices[0]
+        self.navigate_to_waypoint(self.current_index)
         return True
 
     def stop_patrol(self):
         """Stop patrol"""
+        self.cancel_requested = True
         self.state = PatrolState.IDLE
         if self.goal_handle:
             self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
         self.gui_callback('update_status')
 
     def pause_patrol(self):
@@ -342,23 +373,36 @@ class WaypointManager(Node):
 
     def go_next(self):
         """Go to next waypoint (single, not patrol)"""
-        if not self.waypoints:
+        enabled = [
+            index for index, waypoint in enumerate(self.waypoints)
+            if waypoint.get('enabled', True)
+        ]
+        if not enabled:
             return
-        next_idx = (self.current_index + 1) % len(self.waypoints)
+        later = [index for index in enabled if index > self.current_index]
+        next_idx = later[0] if later else enabled[0]
         self.state = PatrolState.NAVIGATING  # Single nav, not patrol
         self.navigate_to_waypoint(next_idx)
 
     def go_previous(self):
         """Go to previous waypoint (single, not patrol)"""
-        if not self.waypoints:
+        enabled = [
+            index for index, waypoint in enumerate(self.waypoints)
+            if waypoint.get('enabled', True)
+        ]
+        if not enabled:
             return
-        prev_idx = (self.current_index - 1) % len(self.waypoints)
+        earlier = [index for index in enabled if index < self.current_index]
+        prev_idx = earlier[-1] if earlier else enabled[-1]
         self.state = PatrolState.NAVIGATING  # Single nav, not patrol
         self.navigate_to_waypoint(prev_idx)
 
     def go_to_index(self, index):
         """Go to specific waypoint by index (single, not patrol)"""
-        if 0 <= index < len(self.waypoints):
+        if (
+            0 <= index < len(self.waypoints)
+            and self.waypoints[index].get('enabled', True)
+        ):
             self.state = PatrolState.NAVIGATING  # Single nav, not patrol
             self.navigate_to_waypoint(index)
 
@@ -395,17 +439,102 @@ class WaypointManager(Node):
         self.gui_callback('update_list')
 
     def save_waypoints(self):
-        """Save waypoints to file"""
-        if not self.waypoints:
-            return False, "No waypoints to save"
-        
+        """Save the selected map-scoped waypoint set."""
         try:
-            os.makedirs(os.path.dirname(self.waypoint_file), exist_ok=True)
-            with open(self.waypoint_file, 'w') as f:
-                yaml.dump({'waypoints': self.waypoints}, f, default_flow_style=False)
-            return True, f"Saved {len(self.waypoints)} waypoints"
+            self.revision = self.store.save_set(
+                self.active_set_id, self.revision, self.waypoints
+            )
+            self.refresh_waypoint_sets()
+            return True, (
+                f'Saved {len(self.waypoints)} waypoints to '
+                f'{self.active_set_name}'
+            )
+        except RuntimeError as error:
+            if str(error).startswith('revision:'):
+                return False, 'Set changed on disk; reload before saving'
+            return False, str(error)
         except Exception as e:
             return False, str(e)
+
+    @property
+    def active_set_name(self):
+        match = next(
+            (item for item in self.waypoint_sets
+             if item['id'] == self.active_set_id),
+            None,
+        )
+        return match['name'] if match else self.active_set_id
+
+    def refresh_waypoint_sets(self):
+        self.waypoint_sets = self.store.list_sets()
+        self.active_set_id = self.store.active_set_id()
+        self.dock = self.store.load_dock()
+        return self.waypoint_sets
+
+    def select_waypoint_set(self, set_id):
+        self.store.select_set(set_id)
+        self.active_set_id = set_id
+        return self.load_waypoints()
+
+    def create_waypoint_set(self, name):
+        self.active_set_id = self.store.create_set(name)
+        self.refresh_waypoint_sets()
+        return self.load_waypoints()
+
+    def rename_waypoint_set(self, name):
+        self.store.rename_set(self.active_set_id, name)
+        self.refresh_waypoint_sets()
+
+    def delete_waypoint_set(self):
+        self.active_set_id = self.store.delete_set(self.active_set_id)
+        self.refresh_waypoint_sets()
+        return self.load_waypoints()
+
+    def save_current_pose_as_dock(self):
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                'map', 'base_link', rclpy.time.Time(),
+                timeout=rclpy.duration.Duration(seconds=1.0),
+            )
+            q = transform.transform.rotation
+            self.dock = {
+                'id': 'dock',
+                'name': 'dock',
+                'x': transform.transform.translation.x,
+                'y': transform.transform.translation.y,
+                'yaw': math.atan2(
+                    2.0 * (q.w * q.z + q.x * q.y),
+                    1.0 - 2.0 * (q.y * q.y + q.z * q.z),
+                ),
+            }
+            self.store.save_dock(self.dock)
+            return True
+        except Exception as error:
+            self.get_logger().error(f'Failed to save dock pose: {error}')
+            return False
+
+    def navigate_to_dock(self):
+        """Navigate to the map-level dock pose."""
+        if not self.dock:
+            self.get_logger().warning('No dock pose is saved for this map')
+            return False
+        if not self.nav_client.wait_for_server(timeout_sec=2.0):
+            self.get_logger().error('Navigation server not available')
+            self.gui_callback('nav_failed')
+            return False
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose.header.frame_id = 'map'
+        goal_msg.pose.header.stamp = self.get_clock().now().to_msg()
+        goal_msg.pose.pose.position.x = self.dock['x']
+        goal_msg.pose.pose.position.y = self.dock['y']
+        goal_msg.pose.pose.orientation.z = math.sin(self.dock['yaw'] / 2.0)
+        goal_msg.pose.pose.orientation.w = math.cos(self.dock['yaw'] / 2.0)
+        self.state = PatrolState.NAVIGATING
+        self.gui_callback('update_status')
+        future = self.nav_client.send_goal_async(goal_msg)
+        future.add_done_callback(self.goal_response_callback)
+        self.get_logger().info('Navigating to map dock')
+        return True
 
     def save_as_exhibits(self, exhibit_file):
         """Export waypoints as exhibits for exhibit navigator"""
@@ -478,24 +607,18 @@ class WaypointManager(Node):
             return False, str(e)
 
     def load_waypoints(self):
-        """Load waypoints from file"""
+        """Load the active map-scoped waypoint set."""
         try:
-            if os.path.exists(self.waypoint_file):
-                with open(self.waypoint_file, 'r') as f:
-                    data = yaml.safe_load(f)
-                    if data and 'waypoints' in data:
-                        self.waypoints = []
-                        for i, wp in enumerate(data['waypoints']):
-                            # Ensure all waypoints have a name
-                            if 'name' not in wp:
-                                wp['name'] = f'waypoint_{i+1}'
-                            # Ensure x, y, yaw exist
-                            wp.setdefault('x', 0.0)
-                            wp.setdefault('y', 0.0)
-                            wp.setdefault('yaw', 0.0)
-                            self.waypoints.append(wp)
-                        self.get_logger().info(f'Loaded {len(self.waypoints)} waypoints')
-                        return True
+            self.refresh_waypoint_sets()
+            self.revision, self.waypoints = self.store.read_set(
+                self.active_set_id
+            )
+            self.current_index = 0
+            self.get_logger().info(
+                f'Loaded {len(self.waypoints)} waypoints from '
+                f'{self.active_set_name}'
+            )
+            return True
         except Exception as e:
             self.get_logger().error(f'Error loading waypoints: {e}')
         return False
@@ -509,13 +632,16 @@ class WaypointManagerGUI:
         
         # Create GUI
         self.root = tk.Tk()
-        self.root.title("Waypoint Manager")
-        self.root.geometry("450x650")
+        self.root.title("Sahabat Waypoints")
+        self.root.geometry("620x720")
+        self.root.minsize(560, 620)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         
         self.running = True
+        self.waypoints_dirty = False
         
         self.create_gui()
+        self.refresh_set_controls()
         self.update_list()
         self.update_status()
         
@@ -542,19 +668,19 @@ class WaypointManagerGUI:
     def handle_ros_callback(self, action):
         if action == 'update_list':
             self.update_list()
+            self.set_waypoint_dirty(True)
         elif action == 'update_status':
             self.update_status()
         elif action == 'nav_failed':
             self.log("ERR: Navigation server not available")
     
     def create_gui(self):
-        # Main frame
-        main = ttk.Frame(self.root, padding="10")
+        main = ttk.Frame(self.root, padding="12")
         main.pack(fill='both', expand=True)
         
         # ===== STATUS BAR =====
         status_frame = ttk.Frame(main)
-        status_frame.pack(fill='x', pady=5)
+        status_frame.pack(fill='x', pady=(0, 8))
         
         self.status_label = ttk.Label(status_frame, text="Status: Idle", font=('Arial', 12, 'bold'))
         self.status_label.pack(side='left')
@@ -563,10 +689,42 @@ class WaypointManagerGUI:
         loop_check = ttk.Checkbutton(status_frame, text="Loop", variable=self.loop_var,
                                       command=self.toggle_loop)
         loop_check.pack(side='right')
+
+        # ===== MAP-SCOPED SET =====
+        set_frame = ttk.LabelFrame(main, text="Waypoint set", padding="8")
+        set_frame.pack(fill='x', pady=(0, 8))
+        set_frame.columnconfigure(0, weight=1)
+
+        self.set_var = tk.StringVar()
+        self.set_combo = ttk.Combobox(
+            set_frame, textvariable=self.set_var, state='readonly'
+        )
+        self.set_combo.grid(row=0, column=0, sticky='ew', padx=(0, 6))
+        self.set_combo.bind('<<ComboboxSelected>>', self.on_set_selected)
+        ttk.Button(
+            set_frame, text="New", command=self.create_set
+        ).grid(row=0, column=1, padx=2)
+        ttk.Button(
+            set_frame, text="Rename", command=self.rename_set
+        ).grid(row=0, column=2, padx=2)
+        ttk.Button(
+            set_frame, text="Delete", command=self.delete_set
+        ).grid(row=0, column=3, padx=(2, 0))
+
+        self.dock_label = ttk.Label(set_frame, text="Map dock: not captured")
+        self.dock_label.grid(row=1, column=0, columnspan=2, sticky='w', pady=(8, 0))
+        dock_actions = ttk.Frame(set_frame)
+        dock_actions.grid(row=1, column=2, columnspan=2, sticky='e', pady=(8, 0))
+        ttk.Button(
+            dock_actions, text="Go to dock", command=self.go_to_dock
+        ).pack(side='left', padx=2)
+        ttk.Button(
+            dock_actions, text="Capture here", command=self.capture_dock
+        ).pack(side='left', padx=2)
         
         # ===== MODE TOGGLE =====
         mode_frame = ttk.LabelFrame(main, text="Click Mode", padding="5")
-        mode_frame.pack(fill='x', pady=5)
+        mode_frame.pack(fill='x', pady=(0, 8))
         
         self.add_mode_var = tk.BooleanVar(value=True)
         ttk.Radiobutton(mode_frame, text="Add Waypoints (click in RViz adds to list)", 
@@ -577,14 +735,21 @@ class WaypointManagerGUI:
                         command=self.toggle_add_mode).pack(anchor='w')
         
         # ===== WAYPOINT LIST =====
-        list_frame = ttk.LabelFrame(main, text="Waypoints (click '2D Goal Pose' in RViz to add)", padding="5")
-        list_frame.pack(fill='both', expand=True, pady=5)
+        list_frame = ttk.LabelFrame(
+            main,
+            text="Waypoints — use RViz 2D Goal Pose to add",
+            padding="8",
+        )
+        list_frame.pack(fill='both', expand=True, pady=(0, 8))
         
         # Listbox with scrollbar
         list_container = ttk.Frame(list_frame)
         list_container.pack(fill='both', expand=True)
         
-        self.waypoint_listbox = tk.Listbox(list_container, height=10, font=('Courier', 10))
+        self.waypoint_listbox = tk.Listbox(
+            list_container, height=10, font=('TkFixedFont', 10),
+            selectmode=tk.BROWSE,
+        )
         self.waypoint_listbox.pack(side='left', fill='both', expand=True)
         
         scrollbar = ttk.Scrollbar(list_container, orient='vertical', 
@@ -594,7 +759,7 @@ class WaypointManagerGUI:
         
         # List control buttons
         list_btn_frame = ttk.Frame(list_frame)
-        list_btn_frame.pack(fill='x', pady=5)
+        list_btn_frame.pack(fill='x', pady=(8, 0))
         
         ttk.Button(list_btn_frame, text="Add Current Pose", width=15, 
                    command=self.add_current_pose).pack(side='left', padx=2)
@@ -602,16 +767,16 @@ class WaypointManagerGUI:
                    command=self.move_up).pack(side='left', padx=2)
         ttk.Button(list_btn_frame, text="Down", width=6,
                    command=self.move_down).pack(side='left', padx=2)
-        ttk.Button(list_btn_frame, text="Rename", width=7,
-                   command=self.rename_selected).pack(side='left', padx=2)
+        ttk.Button(list_btn_frame, text="Edit", width=7,
+                   command=self.edit_selected).pack(side='left', padx=2)
         ttk.Button(list_btn_frame, text="Delete", width=6,
                    command=self.delete_selected).pack(side='left', padx=2)
-        ttk.Button(list_btn_frame, text="Clear", width=6,
+        ttk.Button(list_btn_frame, text="Clear set", width=9,
                    command=self.clear_all).pack(side='left', padx=2)
         
         # ===== NAVIGATION CONTROLS =====
         nav_frame = ttk.LabelFrame(main, text="Navigation", padding="10")
-        nav_frame.pack(fill='x', pady=5)
+        nav_frame.pack(fill='x', pady=(0, 8))
         
         # Row 1: Go to selected, Previous, Next
         nav_row1 = ttk.Frame(nav_frame)
@@ -637,28 +802,152 @@ class WaypointManagerGUI:
         ttk.Button(nav_row2, text="Stop", width=10,
                    command=self.stop_patrol).pack(side='left', padx=2)
         
-        # ===== FILE OPERATIONS =====
-        file_frame = ttk.LabelFrame(main, text="File", padding="5")
-        file_frame.pack(fill='x', pady=5)
+        # ===== SAVE AND SECONDARY TOOLS =====
+        file_frame = ttk.Frame(main)
+        file_frame.pack(fill='x', pady=(0, 8))
         
-        ttk.Button(file_frame, text="Save Waypoints", 
-                   command=self.save_waypoints).pack(side='left', padx=5)
-        ttk.Button(file_frame, text="Reload from File",
+        self.save_button = ttk.Button(
+            file_frame, text="Saved", command=self.save_waypoints,
+            state='disabled',
+        )
+        self.save_button.pack(side='left', padx=5)
+        ttk.Button(file_frame, text="Discard changes",
                    command=self.reload_waypoints).pack(side='left', padx=5)
         ttk.Button(file_frame, text="Save as Exhibits",
-                   command=self.save_waypoints_as_exhibits).pack(side='left', padx=5)
+                   command=self.save_waypoints_as_exhibits).pack(side='right', padx=5)
         ttk.Button(file_frame, text="Load Exhibits",
-                   command=self.load_waypoints_from_exhibits).pack(side='left', padx=5)
+                   command=self.load_waypoints_from_exhibits).pack(side='right', padx=5)
         
         # ===== LOG =====
         log_frame = ttk.LabelFrame(main, text="Log", padding="5")
-        log_frame.pack(fill='both', expand=True, pady=5)
+        log_frame.pack(fill='x')
         
-        self.log_text = tk.Text(log_frame, height=5, state='disabled', wrap='word')
+        self.log_text = tk.Text(log_frame, height=4, state='disabled', wrap='word')
         self.log_text.pack(fill='both', expand=True)
         
         self.log("Waypoint Manager Ready")
         self.log("Click '2D Goal Pose' in RViz to add waypoints")
+
+    def refresh_set_controls(self):
+        """Refresh the set selector and map-level dock summary."""
+        self.node.refresh_waypoint_sets()
+        values = [
+            f"{item['name']}  ·  {item['waypoint_count']} waypoint(s)"
+            for item in self.node.waypoint_sets
+        ]
+        self.set_combo['values'] = values
+        active_index = next(
+            (index for index, item in enumerate(self.node.waypoint_sets)
+             if item['id'] == self.node.active_set_id),
+            0,
+        )
+        if values:
+            self.set_combo.current(active_index)
+        dock = self.node.dock
+        self.dock_label.config(
+            text=(
+                f"Map dock: {dock['x']:.2f}, {dock['y']:.2f}, "
+                f"{dock['yaw']:.2f} rad"
+                if dock else 'Map dock: not captured'
+            )
+        )
+
+    def set_waypoint_dirty(self, dirty):
+        """Show whether the selected set differs from disk."""
+        self.waypoints_dirty = dirty
+        self.save_button.config(
+            text='Save changes' if dirty else 'Saved',
+            state='normal' if dirty else 'disabled',
+        )
+
+    def on_set_selected(self, _event=None):
+        index = self.set_combo.current()
+        if index < 0 or index >= len(self.node.waypoint_sets):
+            return
+        selected = self.node.waypoint_sets[index]
+        if selected['id'] == self.node.active_set_id:
+            return
+        if self.waypoints_dirty and not messagebox.askyesno(
+            'Discard changes?', 'Switch sets and discard unsaved changes?'
+        ):
+            self.refresh_set_controls()
+            return
+        if self.node.state != PatrolState.IDLE:
+            messagebox.showwarning(
+                'Navigation active', 'Stop navigation before switching sets.'
+            )
+            self.refresh_set_controls()
+            return
+        self.node.select_waypoint_set(selected['id'])
+        self.refresh_set_controls()
+        self.update_list()
+        self.set_waypoint_dirty(False)
+        self.log(f"Selected set: {selected['name']}")
+
+    def create_set(self):
+        if self.waypoints_dirty and not messagebox.askyesno(
+            'Discard changes?', 'Create a set and discard unsaved changes?'
+        ):
+            return
+        name = simpledialog.askstring('New waypoint set', 'Set name:')
+        if not name or not name.strip():
+            return
+        self.node.create_waypoint_set(name.strip())
+        self.refresh_set_controls()
+        self.update_list()
+        self.set_waypoint_dirty(False)
+        self.log(f'Created set: {name.strip()}')
+
+    def rename_set(self):
+        name = simpledialog.askstring(
+            'Rename waypoint set', 'Set name:',
+            initialvalue=self.node.active_set_name,
+        )
+        if not name or not name.strip():
+            return
+        self.node.rename_waypoint_set(name.strip())
+        self.refresh_set_controls()
+        self.log(f'Renamed set to: {name.strip()}')
+
+    def delete_set(self):
+        if self.node.state != PatrolState.IDLE:
+            messagebox.showwarning(
+                'Navigation active', 'Stop navigation before deleting a set.'
+            )
+            return
+        if len(self.node.waypoint_sets) <= 1:
+            messagebox.showinfo('Keep one set', 'A map must keep at least one set.')
+            return
+        if not messagebox.askyesno(
+            'Archive waypoint set',
+            f'Archive “{self.node.active_set_name}”?',
+        ):
+            return
+        old_name = self.node.active_set_name
+        self.node.delete_waypoint_set()
+        self.refresh_set_controls()
+        self.update_list()
+        self.set_waypoint_dirty(False)
+        self.log(f'Archived set: {old_name}')
+
+    def capture_dock(self):
+        if self.node.save_current_pose_as_dock():
+            self.refresh_set_controls()
+            self.log('Updated map dock from current pose')
+        else:
+            messagebox.showerror(
+                'Dock not saved',
+                'A valid map-frame robot pose is required.',
+            )
+
+    def go_to_dock(self):
+        if self.node.navigate_to_dock():
+            self.log('Going to map dock')
+        else:
+            messagebox.showerror(
+                'Cannot go to dock',
+                'Save a dock pose and ensure Nav2 is available.',
+            )
     
     def log(self, message):
         self.log_text.config(state='normal')
@@ -671,8 +960,10 @@ class WaypointManagerGUI:
         self.waypoint_listbox.delete(0, tk.END)
         for i, wp in enumerate(self.node.waypoints):
             current = "→ " if i == self.node.current_index and self.node.state != PatrolState.IDLE else "  "
+            enabled = " " if wp.get('enabled', True) else "×"
             self.waypoint_listbox.insert(tk.END, 
-                f"{current}{i+1}. {wp['name']} ({wp['x']:.2f}, {wp['y']:.2f})")
+                f"{current}{enabled} {i+1:02d}  {wp['name']:<24} "
+                f"{wp['x']:>7.2f}  {wp['y']:>7.2f}")
     
     def update_status(self):
         """Update status label"""
@@ -719,9 +1010,62 @@ class WaypointManagerGUI:
             if new_name:
                 self.node.rename_waypoint(idx, new_name)
                 self.log(f"Renamed to: {new_name}")
+
+    def edit_selected(self):
+        """Edit waypoint metadata without crowding the main list."""
+        idx = self.get_selected_index()
+        if idx is None:
+            return
+        waypoint = self.node.waypoints[idx]
+        dialog = tk.Toplevel(self.root)
+        dialog.title('Edit waypoint')
+        dialog.transient(self.root)
+        dialog.grab_set()
+        body = ttk.Frame(dialog, padding='12')
+        body.pack(fill='both', expand=True)
+        body.columnconfigure(1, weight=1)
+
+        name_var = tk.StringVar(value=waypoint['name'])
+        dwell_var = tk.DoubleVar(value=waypoint.get('dwell_seconds', 0.0))
+        enabled_var = tk.BooleanVar(value=waypoint.get('enabled', True))
+        ttk.Label(body, text='Name').grid(row=0, column=0, sticky='w', pady=4)
+        name_entry = ttk.Entry(body, textvariable=name_var, width=32)
+        name_entry.grid(row=0, column=1, sticky='ew', pady=4)
+        ttk.Label(body, text='Dwell seconds').grid(
+            row=1, column=0, sticky='w', pady=4
+        )
+        ttk.Spinbox(
+            body, from_=0.0, to=3600.0, increment=0.5,
+            textvariable=dwell_var,
+        ).grid(row=1, column=1, sticky='ew', pady=4)
+        ttk.Checkbutton(
+            body, text='Include in patrol', variable=enabled_var
+        ).grid(row=2, column=1, sticky='w', pady=4)
+        actions = ttk.Frame(body)
+        actions.grid(row=3, column=0, columnspan=2, sticky='e', pady=(10, 0))
+
+        def save():
+            name = name_var.get().strip()
+            if not name:
+                return
+            waypoint['name'] = name
+            waypoint['dwell_seconds'] = max(0.0, float(dwell_var.get()))
+            waypoint['enabled'] = enabled_var.get()
+            self.update_list()
+            self.set_waypoint_dirty(True)
+            self.waypoint_listbox.selection_set(idx)
+            dialog.destroy()
+
+        ttk.Button(actions, text='Cancel', command=dialog.destroy).pack(
+            side='left', padx=4
+        )
+        ttk.Button(actions, text='Apply', command=save).pack(side='left')
+        name_entry.focus_set()
     
     def clear_all(self):
-        if messagebox.askyesno("Clear All", "Delete all waypoints?"):
+        if messagebox.askyesno(
+            "Clear set", "Remove all waypoints from this set?"
+        ):
             self.node.clear_all()
             self.log("Cleared all waypoints")
     
@@ -773,13 +1117,25 @@ class WaypointManagerGUI:
         success, msg = self.node.save_waypoints()
         if success:
             self.log(f"OK: {msg}")
+            self.refresh_set_controls()
+            self.set_waypoint_dirty(False)
+            messagebox.showinfo('Waypoint set saved', msg)
         else:
             self.log(f"ERR: {msg}")
 
     def reload_waypoints(self):
+        if self.waypoints_dirty and not messagebox.askyesno(
+            'Discard changes?', 'Reload and discard unsaved changes?'
+        ):
+            return
         if self.node.load_waypoints():
+            self.refresh_set_controls()
             self.update_list()
-            self.log(f"Loaded {len(self.node.waypoints)} waypoints")
+            self.set_waypoint_dirty(False)
+            self.log(
+                f"Reloaded {self.node.active_set_name}: "
+                f"{len(self.node.waypoints)} waypoints"
+            )
         else:
             self.log("Could not load waypoints")
     
@@ -802,6 +1158,7 @@ class WaypointManagerGUI:
         success, msg = self.node.load_exhibits(exhibit_file)
         if success:
             self.update_list()
+            self.set_waypoint_dirty(True)
             self.log(f"OK: {msg}")
         else:
             self.log(f"ERR: {msg}")

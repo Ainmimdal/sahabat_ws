@@ -1,0 +1,10 @@
+name: gallerywp
+revision: 5
+waypoints:
+- id: '0'
+  name: wp1
+  x: -1.067
+  y: 1.757
+  yaw: 1.125
+  dwell_seconds: 0.0
+  enabled: true

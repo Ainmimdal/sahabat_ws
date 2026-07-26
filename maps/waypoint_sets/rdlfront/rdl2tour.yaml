@@ -1,0 +1,38 @@
+name: rdl2tour
+revision: 2
+waypoints:
+- id: '0'
+  name: Waypoint 1
+  x: -0.164
+  y: 0.163
+  yaw: 0.243
+  dwell_seconds: 0.0
+  enabled: true
+- id: '1'
+  name: waypoint_2
+  x: 1.158
+  y: -0.114
+  yaw: 0.322
+  dwell_seconds: 0.0
+  enabled: true
+- id: '2'
+  name: waypoint_3
+  x: 2.977
+  y: -1.168
+  yaw: 1.633
+  dwell_seconds: 0.0
+  enabled: true
+- id: '3'
+  name: waypoint_4
+  x: 4.436
+  y: 0.587
+  yaw: 0.879
+  dwell_seconds: 0.0
+  enabled: true
+- id: '4'
+  name: waypoint_5
+  x: 4.113
+  y: 3.801
+  yaw: 0.283
+  dwell_seconds: 0.0
+  enabled: true

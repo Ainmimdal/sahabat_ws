@@ -1,0 +1,10 @@
+name: Default
+revision: 1
+waypoints:
+- id: '0'
+  name: dock
+  x: 1.397
+  y: -6.903
+  yaw: 2.652
+  dwell_seconds: 0.0
+  enabled: true

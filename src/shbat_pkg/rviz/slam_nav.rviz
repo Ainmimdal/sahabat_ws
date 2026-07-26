@@ -3,6 +3,8 @@ Panels:
     Name: Displays
   - Class: rviz_common/Views
     Name: Views
+  - Class: shbat_rviz_plugins/Sahabat Navigation Status
+    Name: Sahabat Navigation Status
   - Class: shbat_rviz_plugins/Localization Recovery
     Name: Localization Recovery
 Visualization Manager:
@@ -62,7 +64,7 @@ Visualization Manager:
         
     - Class: rviz_default_plugins/Map
       Name: Global Costmap
-      Value: false
+      Value: true
       Topic:
         Value: /global_costmap/costmap
         Depth: 1
@@ -75,7 +77,7 @@ Visualization Manager:
       
     - Class: rviz_default_plugins/Map
       Name: Local Costmap
-      Value: false
+      Value: true
       Topic:
         Value: /local_costmap/costmap
         Depth: 1
@@ -112,6 +114,24 @@ Visualization Manager:
         Value: Arrow
       Covariance:
         Value: false
+
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: AMCL Pose
+      Value: true
+      Topic:
+        Value: /amcl_pose
+      Shape:
+        Value: Arrow
+      Color: 255; 85; 0
+      Covariance:
+        Value: true
+
+    - Class: rviz_default_plugins/PoseArray
+      Name: AMCL Particles
+      Value: true
+      Topic:
+        Value: /particle_cloud
+      Color: 255; 170; 0
         
     - Class: rviz_default_plugins/MarkerArray
       Name: Waypoint Markers
@@ -148,13 +168,10 @@ Visualization Manager:
   Tools:
     - Class: rviz_default_plugins/Interact
     - Class: rviz_default_plugins/MoveCamera
-    - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/SetInitialPose
       Topic: /initialpose
-    - Class: rviz_default_plugins/SetGoal
-      Topic: /goal_pose
     - Class: rviz_default_plugins/Measure
-    - Class: rviz_default_plugins/PublishPoint
+    - Class: nav2_rviz_plugins/GoalTool
       
   Views:
     Current:

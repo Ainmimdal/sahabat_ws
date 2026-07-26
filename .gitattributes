@@ -1,0 +1,11 @@
+maps/galleryleft.posegraph filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq.data filter=lfs diff=lfs merge=lfs -text
+maps/gallery_mapfail.data filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq.posegraph filter=lfs diff=lfs merge=lfs -text
+maps/gallery_mapfail.posegraph filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq2.data filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq2.posegraph filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq3.data filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq3.posegraph filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq4.data filter=lfs diff=lfs merge=lfs -text
+maps/gallerysq4.posegraph filter=lfs diff=lfs merge=lfs -text

@@ -86,23 +86,30 @@ controller_server:
     general_goal_checker:
       stateful: True               # Once in tolerance, stay "reached" even if drifts slightly
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.20      # 20cm position tolerance - good balance
-      yaw_goal_tolerance: 0.20     # ~11 degrees - reasonable orientation matching
+      xy_goal_tolerance: 0.05      # Finish within 5 cm before accepting the goal
+      yaw_goal_tolerance: 0.05     # Finish within ~3 degrees of the requested yaw
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.3      # Normal cruising speed
-      max_linear_vel: 0.5          # Max 0.5 m/s for safety
-      min_linear_vel: 0.05         # Back to original
+      desired_linear_vel: 0.3      # Proven indoor cruise speed
+      max_linear_vel: 0.5          # Conservative physical command cap
+      min_linear_vel: 0.05
+      min_approach_linear_velocity: 0.08  # Avoid crawling below reliable motor motion
+      approach_velocity_scaling_dist: 0.8 # Start a gradual slowdown before the goal
       max_angular_vel: 0.5         # 0.5 rad/s for 10Hz LIDAR sync
-      min_angular_vel: 0.05        # Back to original
-      lookahead_dist: 0.5          # Back to original
-      min_lookahead_dist: 0.3      # Back to original
+      min_angular_vel: 0.05
+      lookahead_dist: 0.5          # Shorter aim point reduces corner cutting
+      min_lookahead_dist: 0.3
       max_lookahead_dist: 0.9
       lookahead_time: 1.5
       use_rotate_to_heading: true
-      rotate_to_heading_angular_vel: 0.4  # Back to original
-      rotate_to_heading_min_angle: 0.15   # Keep this - only rotate if >8.5 degrees off
+      rotate_to_heading_angular_vel: 0.5  # Use the full lidar-safe turn rate
+      # Must overcome drivetrain stiction on the first controller command.
+      # The downstream velocity smoother still limits the physical ramp.
+      max_angular_accel: 3.0
+      # Drive small errors as arcs, but pivot before an indoor turn becomes too
+      # tight for the 0.5 rad/s angular limit.
+      rotate_to_heading_min_angle: 0.3  # ~17 degrees
       transform_tolerance: 0.5
       use_velocity_scaled_lookahead_dist: true
       allow_reversing: false
@@ -113,7 +120,7 @@ controller_server:
       cost_scaling_gain: 0.5       # Reduced from 1.0 - less aggressive slowdown
       inflation_cost_scaling_factor: 3.0
       regulated_linear_scaling_min_radius: 0.9
-      regulated_linear_scaling_min_speed: 0.15  # Higher min speed near obstacles
+      regulated_linear_scaling_min_speed: 0.15  # Permit tight, lidar-safe indoor turns
 
 local_costmap:
   local_costmap:
@@ -283,13 +290,15 @@ behavior_server:
 velocity_smoother:
   ros__parameters:
     use_sim_time: False
-    smoothing_frequency: 20.0
-    scale_velocities: False
+    smoothing_frequency: 30.0
+    scale_velocities: True
     feedback: "OPEN_LOOP"
-    max_velocity: [0.5, 0.0, 0.5]      # [vx, vy, vtheta] - REDUCED angular for 10Hz LIDAR
-    min_velocity: [-0.3, 0.0, -0.5]    # Allow some reverse
-    max_accel: [1.0, 0.0, 1.0]         # Slower angular acceleration
-    max_decel: [-1.0, 0.0, -1.0]       # Slower angular deceleration
+    max_velocity: [0.5, 0.0, 0.5]      # Conservative linear and lidar-safe turn caps
+    min_velocity: [-0.3, 0.0, -0.5]    # Reverse remains limited to recovery behavior
+    max_accel: [0.6, 0.0, 0.8]         # Gentle normal acceleration
+    # Keep forward braking gentle, but stop rotation promptly after the goal
+    # checker accepts yaw so angular coasting does not spoil the final pose.
+    max_decel: [-0.5, 0.0, -3.0]
     odom_topic: /odom
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

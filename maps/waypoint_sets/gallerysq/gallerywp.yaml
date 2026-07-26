@@ -1,0 +1,24 @@
+name: gallerywp
+revision: 3
+waypoints:
+- id: '0'
+  name: dock
+  x: 1.742
+  y: -7.071
+  yaw: 2.652
+  dwell_seconds: 0.0
+  enabled: true
+- id: '1'
+  name: wp1
+  x: -1.925
+  y: -1.551
+  yaw: 1.342
+  dwell_seconds: 0.0
+  enabled: true
+- id: '2'
+  name: wp2
+  x: 1.002
+  y: 6.577
+  yaw: 1.08
+  dwell_seconds: 0.0
+  enabled: true

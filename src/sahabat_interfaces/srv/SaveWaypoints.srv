@@ -1,8 +1,10 @@
 string map_id
+string set_id
 uint64 expected_revision
 sahabat_interfaces/Waypoint[] waypoints
 string lease_id
 ---
 bool success
 uint64 revision
+string set_id
 string message

@@ -1,6 +1,29 @@
 # Sahabat Robot - Project Status
 
-**Last Updated:** May 12, 2026
+**Last Updated:** June 29, 2026
+
+## Current Implementation Notes (June 29, 2026)
+
+- The active map identity is a map file stem, e.g. `rdlfront` maps to
+  `~/sahabat_ws/maps/rdlfront.yaml`.
+- Per-map waypoint sets live under
+  `~/sahabat_ws/maps/waypoint_sets/<map_id>/`; for `rdlfront`, use
+  `~/sahabat_ws/maps/waypoint_sets/rdlfront/`.
+- `~/sahabat_ws/maps/last_selected_map` stores the last selected map id for
+  the live waypoint-editor launcher.
+- The RViz waypoint editor is vendored as `src/waypoint_editor` and launched by
+  `waypoint_editor.launch.py`. It supports offline YAML editing and live
+  operator-backend editing.
+- Desktop launchers currently include:
+  - `Sahabat Waypoint Editor Offline`: offline map/waypoint-set editing.
+  - `Sahabat Waypoint Editor Live`: starts live operations plus the RViz
+    waypoint editor as the single RViz window with ZED enabled by default.
+  - `Sahabat New Mapping`: starts `navigation.launch.py mode:=mapping
+    use_zed:=true`.
+- ZED support is enabled with `use_zed:=true` in `slam_nav_launch.py`,
+  `localization_patrol_launch.py`, `navigation.launch.py`, and
+  `operations.launch.py`. The one-click live waypoint editor passes it by
+  default; use `ros2 run shbat_pkg live_waypoint_editor --no-zed` to disable it.
 
 ## ✅ Current Working Setup
 
@@ -53,7 +76,7 @@
 | AMCL | Localization with saved map | ✅ Working |
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
 | Waypoint Manager | `shbat_pkg/waypoint_manager` | ✅ Working (GUI) |
-| ZED Obstacle Detection | VoxelLayer + PointCloud2 | ✅ Working |
+| ZED Obstacle Detection | VoxelLayer + PointCloud2 | ✅ Launchable from operations and mapping paths with `use_zed:=true` |
 
 ---
 
@@ -92,8 +115,9 @@
 - Auto-disables sensors not detected
 
 ### 6. SLAM Toolbox (2D Mapping)
-- **Launch:** `ros2 launch shbat_pkg navigation.launch.py mode:=mapping`
+- **Launch:** `ros2 launch shbat_pkg navigation.launch.py mode:=mapping use_zed:=true`
 - Lightweight 2D SLAM using LIDAR only
+- ZED pointcloud feeds Nav2 VoxelLayer obstacle detection while mapping.
 - Opens the Sahabat Mapping GUI for naming and saving maps
 - Saves navigation maps and editable sessions under `~/sahabat_ws/maps/`
 - Config: `config/slam_toolbox.yaml`
@@ -143,7 +167,15 @@
 - Default port: 8765
 
 ### 11. ZED 3D Obstacle Detection (VoxelLayer + PointCloud2)
-- **Enabled via:** `use_zed:=true` launch argument
+- **Enabled via:** `use_zed:=true` launch argument in `slam_nav_launch.py`,
+  `localization_patrol_launch.py`, `navigation.launch.py`, or
+  `operations.launch.py`.
+- `slam_nav_launch.py` starts the ZED wrapper as namespace `zed`, node
+  `zed_node`, camera name `zed2i`; the obstacle pointcloud topic is
+  `/zed/zed_node/point_cloud/cloud_registered`.
+- Nav2 costmap configs use VoxelLayer/PointCloud2 for ZED obstacle input. The
+  pointcloud topic is aligned across `nav2_odom_only.yaml`, `nav2_params.yaml`,
+  `nav2_params_mapping.yaml`, and `nav2_params_odom.yaml`.
 
 ### 12. Localization + Patrol Launch (Production Ready)
 - **Launch:** `ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/path/to/map`
@@ -173,6 +205,7 @@
 |-------------|---------|
 | `localization_patrol_launch.py` | **Production** - Localization + Nav2 + Waypoint GUI |
 | `slam_nav_launch.py` | SLAM + Nav2 (mapping or localization mode) |
+| `waypoint_editor.launch.py` | RViz waypoint editor; offline local YAML mode or live operator-backend mode |
 | `nav2_test_launch.py` | Nav2 navigation testing (odom-only, rolling global costmap) |
 | `sahabat_launch.py` | Basic robot bringup (no Nav2) |
 
@@ -211,8 +244,13 @@ ros2 launch shbat_pkg localization_patrol_launch.py \
     use_zed:=true \
     use_api:=true
 
+# === LIVE WAYPOINT EDITOR (single RViz window) ===
+# Uses ~/sahabat_ws/maps/last_selected_map and starts operations plus the
+# waypoint editor RViz. ZED is enabled by default; add --no-zed to disable it.
+ros2 run shbat_pkg live_waypoint_editor
+
 # === SLAM MAPPING (create new map) ===
-ros2 launch shbat_pkg navigation.launch.py mode:=mapping
+ros2 launch shbat_pkg navigation.launch.py mode:=mapping use_zed:=true
 
 # Enter the map name and press Save Map in the Sahabat Mapping panel.
 # Output is stored under ~/sahabat_ws/maps/ by default.

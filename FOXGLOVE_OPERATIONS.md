@@ -54,7 +54,7 @@ commands zero. The panel provides independent speed sliders up to 0.50 m/s and
 1.20 rad/s.
 
 Open a saved map from **Maps** to start complete operation mode. This loads
-localization, the map-specific waypoint file and its named `dock` pose. If the
+localization, the map-level dock pose and the active named waypoint set. If the
 lidar overlay does not match the map, select **Global relocalize + rotate**
 directly below Drive. The robot rotates at 0.25 rad/s until AMCL covariance is
 stable, or stops on E-stop, stale lidar, operator cancellation, or timeout.
@@ -68,11 +68,24 @@ maps/<map_id>/
   metadata.yaml
   session.posegraph       # optional editable SLAM session
   session.data            # optional editable SLAM session
-  waypoints.yaml
+  dock.yaml
+  waypoint_sets/
+    index.yaml            # active set
+    default.yaml
+    <set_id>.yaml
+  waypoints.yaml          # retained legacy source after first migration
 ```
 
-Overwrites move the previous directory under `maps/.archive/`. Waypoint saves
-use revision checks, so two stale editors cannot silently overwrite each other.
+The first access copies an existing `waypoints.yaml` into the **Default** set,
+moves its named `dock` into map-level storage, and leaves the original file
+unchanged. Foxglove and RViz then select and edit the same sets. Deleting a set
+archives its file, and each set has an independent revision check so a stale
+editor cannot silently overwrite it. Map overwrites still move the previous
+map directory under `maps/.archive/`.
+
+Selecting a set loads it immediately; **Save changes** writes edits to that
+selected set and does not require restarting either UI. The shared map dock is
+available through **Go to dock** from every set.
 
 ## Optional Android gateway
 
@@ -112,9 +125,11 @@ physical E-stop:
 2. Confirm keyboard and gamepad cannot command at the same time.
 3. While moving slowly, test focus loss, gamepad removal and Wi-Fi loss; verify
    zero velocity within 500 ms.
-4. Save/load a named map, edit/click-add/reorder waypoints, navigate and patrol
-   with no Jetson HDMI peripherals.
-5. Confirm map/scan/TF health and all E-stop paths before public operation.
+4. Save/load a named map, create and switch between two waypoint sets, then
+   edit/click-add/reorder, navigate and patrol with no Jetson HDMI peripherals.
+5. Open the same map in the RViz Waypoint Manager and confirm it shows the same
+   active set, waypoint order and map-level dock.
+6. Confirm map/scan/TF health and all E-stop paths before public operation.
 
 Collision Monitor is intentionally bypassed for remote manual operation. The
 operator is responsible for obstacle clearance while driving.

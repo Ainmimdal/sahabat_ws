@@ -39,6 +39,12 @@ type Waypoint = {
   dwell_seconds: number;
   enabled: boolean;
 };
+type WaypointSet = {
+  id: string;
+  name: string;
+  revision: number;
+  waypoint_count: number;
+};
 type PoseStamped = {
   pose: {
     position: { x: number; y: number };
@@ -94,7 +100,11 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const [mapId, setMapId] = useState("");
   const [keepEditable, setKeepEditable] = useState(true);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
+  const [waypointSets, setWaypointSets] = useState<WaypointSet[]>([]);
+  const [selectedSetId, setSelectedSetId] = useState("");
+  const [dock, setDock] = useState<Waypoint | undefined>();
   const [revision, setRevision] = useState(0);
+  const [waypointsDirty, setWaypointsDirty] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState("");
   const keys = useRef(new Set<string>());
@@ -161,6 +171,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
             dwell_seconds: 0,
             enabled: true,
           }]);
+          setWaypointsDirty(true);
         }
       }
       done();
@@ -346,32 +357,101 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
     await refreshMaps();
   };
 
-  const loadWaypoints = useCallback(async () => {
-    if (!status.active_map) return;
-    const result = await call<{ revision: number; waypoints: Waypoint[] }>(
+  const loadWaypoints = useCallback(async (setId = selectedSetId) => {
+    if (!status.active_map || !setId) return;
+    const result = await call<{ revision: number; set_id: string; waypoints: Waypoint[] }>(
       "/operator/waypoints/get",
-      { map_id: status.active_map },
+      { map_id: status.active_map, set_id: setId },
     );
     setRevision(result.revision);
+    setSelectedSetId(result.set_id);
     setWaypoints(result.waypoints);
-  }, [call, status.active_map]);
+    setWaypointsDirty(false);
+  }, [call, selectedSetId, status.active_map]);
+
+  const refreshWaypointSets = useCallback(async () => {
+    if (!status.active_map) return;
+    const result = await call<{
+      sets: WaypointSet[];
+      active_set_id: string;
+      has_dock: boolean;
+      dock: Waypoint;
+    }>("/operator/waypoint_sets/list", { map_id: status.active_map });
+    setWaypointSets(result.sets);
+    setSelectedSetId(result.active_set_id);
+    setDock(result.has_dock ? result.dock : undefined);
+    await loadWaypoints(result.active_set_id);
+  }, [call, loadWaypoints, status.active_map]);
 
   useEffect(() => {
-    if (status.active_map) void run("Loading routes", loadWaypoints);
-  }, [loadWaypoints, run, status.active_map]);
+    if (status.active_map) void run("Loading waypoint sets", refreshWaypointSets);
+    else {
+      setWaypointSets([]);
+      setSelectedSetId("");
+      setWaypoints([]);
+      setDock(undefined);
+      setWaypointsDirty(false);
+    }
+  }, [refreshWaypointSets, run, status.active_map]);
 
   const saveWaypoints = async () => {
-    const result = await call<{ revision: number; message: string }>(
+    const result = await call<{ success: boolean; revision: number; message: string }>(
       "/operator/waypoints/save",
       {
         map_id: status.active_map,
+        set_id: selectedSetId,
         expected_revision: revision,
         waypoints,
         lease_id: leaseRef.current,
       },
     );
-    setRevision(result.revision);
     setNotice(result.message);
+    if (result.success) {
+      setRevision(result.revision);
+      await refreshWaypointSets();
+      const selected = waypointSets.find((item) => item.id === selectedSetId);
+      setNotice(`Saved “${selected?.name ?? selectedSetId}”`);
+    }
+  };
+
+  const manageWaypointSet = async (action: number, setId: string, name = "") => {
+    const result = await call<{ success: boolean; active_set_id: string; message: string }>(
+      "/operator/waypoint_sets/manage",
+      {
+        action,
+        map_id: status.active_map,
+        set_id: setId,
+        name,
+        lease_id: leaseRef.current,
+      },
+    );
+    setNotice(result.message);
+    if (result.success) await refreshWaypointSets();
+  };
+
+  const createWaypointSet = async () => {
+    if (waypointsDirty && !window.confirm("Discard unsaved waypoint changes?")) return;
+    const name = window.prompt("Name this waypoint set", "New route");
+    if (name?.trim()) await manageWaypointSet(0, "", name.trim());
+  };
+
+  const renameWaypointSet = async () => {
+    const current = waypointSets.find((item) => item.id === selectedSetId);
+    if (!current) return;
+    const name = window.prompt("Rename waypoint set", current.name);
+    if (name?.trim()) await manageWaypointSet(1, current.id, name.trim());
+  };
+
+  const deleteWaypointSet = async () => {
+    const current = waypointSets.find((item) => item.id === selectedSetId);
+    if (!current || !window.confirm(`Archive waypoint set “${current.name}”?`)) return;
+    await manageWaypointSet(2, current.id);
+  };
+
+  const selectWaypointSet = async (setId: string) => {
+    if (setId === selectedSetId) return;
+    if (waypointsDirty && !window.confirm("Discard unsaved waypoint changes?")) return;
+    await manageWaypointSet(3, setId);
   };
 
   const addCurrentPose = () => {
@@ -386,32 +466,39 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       dwell_seconds: 0,
       enabled: true,
     }]);
+    setWaypointsDirty(true);
   };
 
-  const setDockHere = () => setWaypoints((old) => {
+  const setDockHere = async () => {
     if (status.header?.frame_id !== "map") {
       setNotice("Map-frame robot pose is not available yet");
-      return old;
+      return;
     }
-    const existing = old.findIndex((item) => item.name.trim().toLowerCase() === "dock");
-    const dock: Waypoint = {
-      id: existing >= 0 ? old[existing]!.id : crypto.randomUUID(),
+    const nextDock: Waypoint = {
+      id: dock?.id ?? crypto.randomUUID(),
       name: "dock",
       pose: { ...status.pose },
       dwell_seconds: 0,
       enabled: true,
     };
-    if (existing < 0) return [dock, ...old];
-    return old.map((item, index) => index === existing ? dock : item);
-  });
+    const result = await call<{ success: boolean; message: string }>("/operator/dock/save", {
+      map_id: status.active_map,
+      dock: nextDock,
+      lease_id: leaseRef.current,
+    });
+    if (result.success) setDock(nextDock);
+    setNotice(result.message);
+  };
 
   const updateWaypoint = (index: number, patch: Partial<Waypoint>) => {
+    setWaypointsDirty(true);
     setWaypoints((all) => all.map((item, itemIndex) => (
       itemIndex === index ? { ...item, ...patch } : item
     )));
   };
 
   const moveWaypoint = (index: number, offset: number) => {
+    setWaypointsDirty(true);
     setWaypoints((all) => {
       const target = index + offset;
       if (target < 0 || target >= all.length) return all;
@@ -424,6 +511,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
   const patrol = async (command: number, waypointId = "") => {
     const result = await call<{ message: string }>("/operator/patrol", {
       command,
+      set_id: selectedSetId,
       waypoint_id: waypointId,
       loop: command === 1,
       lease_id: leaseRef.current,
@@ -538,11 +626,15 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
       </section>
 
       <section className="stack routesSection">
-        <div className="sectionTitle"><div><h2>Routes · {status.active_map || "no map"}</h2><p>Click a pose in the 3D panel or capture the robot’s current pose.</p></div><button disabled={!status.active_map} onClick={() => void run("Loading routes", loadWaypoints)}>Reload</button></div>
+        <div className="sectionTitle"><div><h2>Waypoint sets · {status.active_map || "no map"}</h2><p>Choose a set to load it immediately. Save changes only writes the selected set.</p></div><button disabled={!status.active_map} onClick={() => { if (!waypointsDirty || window.confirm("Discard unsaved waypoint changes?")) void run("Loading waypoint sets", refreshWaypointSets); }}>Reload</button></div>
+        <div className="setBar">
+          <label><span>Selected set {waypointsDirty ? "· unsaved changes" : "· saved"}</span><select disabled={!hasLease || waypointSets.length === 0 || ["navigating", "patrolling"].includes(status.navigation_state)} value={selectedSetId} onChange={(event) => void run("Switching waypoint set", () => selectWaypointSet(event.target.value))}>{waypointSets.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.waypoint_count}</option>)}</select></label>
+          <div className="actions"><button disabled={!hasLease || !status.active_map} onClick={() => void run("Creating waypoint set", createWaypointSet)}>New set</button><button disabled={!hasLease || !selectedSetId} onClick={() => void run("Renaming waypoint set", renameWaypointSet)}>Rename</button><button className="dangerText" disabled={!hasLease || waypointSets.length <= 1} onClick={() => void run("Archiving waypoint set", deleteWaypointSet)}>Delete</button></div>
+        </div>
+        <div className="dockSummary"><span>Map dock</span><b>{dock ? `${dock.pose.x.toFixed(2)}, ${dock.pose.y.toFixed(2)}, ${dock.pose.theta.toFixed(2)}` : "Not captured"}</b><div className="actions"><button disabled={!canMove || !dock} onClick={() => void run("Navigating to dock", () => patrol(0, "__map_dock__"))}>Go to dock</button><button disabled={!hasLease || !status.active_map || !mapPoseReady} onClick={() => void run("Saving dock", setDockHere)}>{dock ? "Update here" : "Capture here"}</button></div></div>
         <div className="actions">
           <button disabled={!status.active_map || !mapPoseReady} onClick={addCurrentPose}>Add current pose</button>
-          <button disabled={!status.active_map || !mapPoseReady} onClick={setDockHere}>Set dock here</button>
-          <button className="primary" disabled={!hasLease || !status.active_map} onClick={() => void run("Saving routes", saveWaypoints)}>Save changes</button>
+          <button className="primary" disabled={!hasLease || !status.active_map || !selectedSetId || !waypointsDirty} onClick={() => void run("Saving waypoint set", saveWaypoints)}>{waypointsDirty ? "Save changes" : "Saved"}</button>
         </div>
         <div className="patrol">
           <button disabled={!canMove || waypoints.length === 0} onClick={() => void run("Starting patrol", () => patrol(1))}>Start patrol</button>
@@ -551,7 +643,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
           <button disabled={!hasLease} onClick={() => void run("Stopping patrol", () => patrol(4))}>Stop</button>
         </div>
         <div className="waypoints">{waypoints.length === 0 && <div className="empty">No waypoints for this map.</div>}{waypoints.map((point, index) => (
-          <article className={point.name.toLowerCase() === "dock" ? "dock" : ""} key={point.id}>
+          <article key={point.id}>
             <div className="waypointHead"><input aria-label="Waypoint name" value={point.name} onChange={(event) => updateWaypoint(index, { name: event.target.value })}/><label className="check"><input type="checkbox" checked={point.enabled} onChange={(event) => updateWaypoint(index, { enabled: event.target.checked })}/> Enabled</label></div>
             <div className="coordinates">
               <label>X<input type="number" step="0.05" value={point.pose.x} onChange={(event) => updateWaypoint(index, { pose: { ...point.pose, x: Number(event.target.value) } })}/></label>
@@ -559,7 +651,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
               <label>Yaw<input type="number" step="0.05" value={point.pose.theta} onChange={(event) => updateWaypoint(index, { pose: { ...point.pose, theta: Number(event.target.value) } })}/></label>
               <label>Dwell<input type="number" min="0" step="0.5" value={point.dwell_seconds} onChange={(event) => updateWaypoint(index, { dwell_seconds: Number(event.target.value) })}/></label>
             </div>
-            <div className="waypointActions"><button disabled={index === 0} onClick={() => moveWaypoint(index, -1)}>Up</button><button disabled={index === waypoints.length - 1} onClick={() => moveWaypoint(index, 1)}>Down</button><button disabled={!canMove || !point.enabled} onClick={() => void run("Navigating", () => patrol(0, point.id))}>Go</button><button className="dangerText" onClick={() => setWaypoints((all) => all.filter((_, itemIndex) => itemIndex !== index))}>Delete</button></div>
+            <div className="waypointActions"><button disabled={index === 0} onClick={() => moveWaypoint(index, -1)}>Up</button><button disabled={index === waypoints.length - 1} onClick={() => moveWaypoint(index, 1)}>Down</button><button disabled={!canMove || !point.enabled} onClick={() => void run("Navigating", () => patrol(0, point.id))}>Go</button><button className="dangerText" onClick={() => { setWaypointsDirty(true); setWaypoints((all) => all.filter((_, itemIndex) => itemIndex !== index)); }}>Delete</button></div>
           </article>
         ))}</div>
       </section>
@@ -572,7 +664,7 @@ function OperatorPanel({ context }: { context: PanelExtensionContext }): React.J
 }
 
 const css = `
-  :root{color-scheme:dark}*{box-sizing:border-box}.sahabat{--bg:#0b1117;--surface:#121c25;--surface2:#182630;--line:#2b3e4b;--text:#edf4f7;--muted:#91a6b2;--teal:#42c8b5;--teal2:#176b63;--red:#e33d49;--amber:#e4ad45;font:13px Inter,system-ui,sans-serif;color:var(--text);background:var(--bg);min-height:100%;padding:10px}button,input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:8px 10px}button{cursor:pointer;font-weight:650}button:hover:not(:disabled){border-color:#5c7b8d}button:disabled{opacity:.38;cursor:not-allowed}h2,p{margin:0}h2{font-size:14px}p,span,small{color:var(--muted)}small{display:block;font-size:10px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:10px}.identity{display:flex;align-items:center;gap:12px}.identity>b{font-size:17px;letter-spacing:.14em;color:var(--teal)}.connection:before,.healthStrip span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:5px}.ok{color:var(--teal)!important}.bad{color:#ff7c85!important}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:8px 0 5px}.summary>div{background:var(--surface);padding:6px 8px;min-width:0}.summary strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.healthStrip{display:flex;flex-wrap:wrap;gap:5px 12px;padding:3px 1px}.healthStrip span{font-size:10px}.controlBar{display:flex;align-items:center;gap:7px;margin:6px 0 9px}.controlBar span{margin-left:auto;text-align:right}.primary{background:var(--teal2);border-color:var(--teal);color:white}.quiet{width:100%;background:transparent}button.active{background:var(--teal2);border-color:var(--teal)}main{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(380px,1.25fr);grid-template-areas:"drive maps" "health routes";align-items:start;gap:10px;min-height:250px}.stack{display:grid;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:10px}.driveSection{grid-area:drive}.healthSection{grid-area:health}.mapsSection{grid-area:maps}.routesSection{grid-area:routes}.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.sectionTitle p{margin-top:3px}.warning{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#362a16;border:1px solid #795b24;border-radius:8px;padding:8px}.warning div{display:grid;gap:3px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px}.drivePad{min-height:82px;display:flex;justify-content:center;align-items:center;text-align:left;gap:16px;background:var(--surface2);border-radius:8px;padding:9px}.drivePad>div:last-child{display:grid;gap:4px}.keys{display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(2,26px);gap:3px}.keys i{display:grid;place-items:center;background:#243744;border:1px solid #486273;border-radius:5px;font-style:normal;font-weight:800}.keys i:first-child{grid-column:2}.speedControls input{width:100%;accent-color:var(--teal)}.command{display:flex;justify-content:space-between;align-items:center;padding:9px;background:#172832;border-left:4px solid #526d7d;border-radius:6px}.command.moving{background:#15332f;border-color:var(--teal)}.pose{text-align:center;color:var(--muted)}.form{display:grid;gap:8px}.form label,.coordinates label{display:grid;gap:4px;color:var(--muted)}.twoCol{grid-template-columns:2fr 1fr}.check{display:flex!important;align-items:center;gap:7px!important}.check input{width:auto}.actions,.patrol,.waypointActions{display:flex;flex-wrap:wrap;gap:5px}.list,.waypoints{display:grid;gap:6px}.list article,.waypoints article{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:8px}.list article{display:flex;justify-content:space-between;align-items:center}.list article>div{display:grid;gap:3px}.list article.selected{border-color:var(--teal)}.empty{text-align:center;color:var(--muted);padding:14px}.waypoints article.dock{border-left:4px solid var(--amber)}.waypointHead{display:flex;justify-content:space-between;gap:8px}.waypointHead>input{font-weight:750;flex:1}.coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:7px 0}.coordinates input{min-width:0;width:100%}.dangerText{color:#ff8b93}.recoveryCard{display:grid;grid-template-columns:minmax(170px,1fr) auto;gap:7px 10px;align-items:center;padding:8px;background:var(--surface2);border-radius:8px}.recoveryCard p{margin-top:3px}.recoveryState{display:grid;gap:2px;text-align:right}.recoveryState b{color:var(--amber)}.recoveryCard .actions{grid-column:1/-1}.details{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.details>div{background:var(--surface2);padding:6px;border-radius:6px;min-width:0}.details b{display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.busy{position:sticky;bottom:5px;margin-top:7px;background:#203844;border:1px solid #477184;padding:8px;border-radius:7px}footer{position:sticky;bottom:5px;margin-top:7px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--amber);color:#151515;padding:8px;border-radius:7px}footer span{color:#151515}footer button{padding:2px 7px;background:transparent;border:0;color:#151515;font-size:18px}@media(max-width:820px){main{grid-template-columns:1fr;grid-template-areas:"drive" "health" "maps" "routes"}}@media(max-width:560px){.summary{grid-template-columns:repeat(2,1fr)}.coordinates,.details{grid-template-columns:repeat(2,1fr)}.twoCol{grid-template-columns:1fr}.controlBar{flex-wrap:wrap}.controlBar span{width:100%;text-align:left}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle>button{width:100%}.drivePad{align-items:center;flex-direction:column;text-align:center}.recoveryCard{grid-template-columns:1fr}.recoveryState{text-align:left}.recoveryCard .actions{grid-column:auto}}
+  :root{color-scheme:dark}*{box-sizing:border-box}.sahabat{--bg:#0b1117;--surface:#121c25;--surface2:#182630;--line:#2b3e4b;--text:#edf4f7;--muted:#91a6b2;--teal:#42c8b5;--teal2:#176b63;--red:#e33d49;--amber:#e4ad45;font:13px Inter,system-ui,sans-serif;color:var(--text);background:var(--bg);min-height:100%;padding:10px}button,input,select{font:inherit;color:var(--text);background:var(--surface2);border:1px solid var(--line);border-radius:7px;padding:8px 10px}button{cursor:pointer;font-weight:650}button:hover:not(:disabled){border-color:#5c7b8d}button:disabled{opacity:.38;cursor:not-allowed}h2,p{margin:0}h2{font-size:14px}p,span,small{color:var(--muted)}small{display:block;font-size:10px}.topbar{display:flex;justify-content:space-between;align-items:center;gap:10px}.identity{display:flex;align-items:center;gap:12px}.identity>b{font-size:17px;letter-spacing:.14em;color:var(--teal)}.connection:before,.healthStrip span:before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;background:currentColor;margin-right:5px}.ok{color:var(--teal)!important}.bad{color:#ff7c85!important}.summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:8px 0 5px}.summary>div{background:var(--surface);padding:6px 8px;min-width:0}.summary strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.healthStrip{display:flex;flex-wrap:wrap;gap:5px 12px;padding:3px 1px}.healthStrip span{font-size:10px}.controlBar{display:flex;align-items:center;gap:7px;margin:6px 0 9px}.controlBar span{margin-left:auto;text-align:right}.primary{background:var(--teal2);border-color:var(--teal);color:white}.quiet{width:100%;background:transparent}button.active{background:var(--teal2);border-color:var(--teal)}main{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(380px,1.25fr);grid-template-areas:"drive maps" "health routes";align-items:start;gap:10px;min-height:250px}.stack{display:grid;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:10px}.driveSection{grid-area:drive}.healthSection{grid-area:health}.mapsSection{grid-area:maps}.routesSection{grid-area:routes}.sectionTitle{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.sectionTitle p{margin-top:3px}.warning{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#362a16;border:1px solid #795b24;border-radius:8px;padding:8px}.warning div{display:grid;gap:3px}.segmented{display:grid;grid-template-columns:1fr 1fr;gap:4px}.drivePad{min-height:82px;display:flex;justify-content:center;align-items:center;text-align:left;gap:16px;background:var(--surface2);border-radius:8px;padding:9px}.drivePad>div:last-child{display:grid;gap:4px}.keys{display:grid;grid-template-columns:repeat(3,28px);grid-template-rows:repeat(2,26px);gap:3px}.keys i{display:grid;place-items:center;background:#243744;border:1px solid #486273;border-radius:5px;font-style:normal;font-weight:800}.keys i:first-child{grid-column:2}.speedControls input{width:100%;accent-color:var(--teal)}.command{display:flex;justify-content:space-between;align-items:center;padding:9px;background:#172832;border-left:4px solid #526d7d;border-radius:6px}.command.moving{background:#15332f;border-color:var(--teal)}.pose{text-align:center;color:var(--muted)}.form{display:grid;gap:8px}.form label,.coordinates label,.setBar label{display:grid;gap:4px;color:var(--muted)}.twoCol{grid-template-columns:2fr 1fr}.check{display:flex!important;align-items:center;gap:7px!important}.check input{width:auto}.actions,.patrol,.waypointActions{display:flex;flex-wrap:wrap;gap:5px}.setBar{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:8px;align-items:end;padding:8px;background:#101a22;border:1px solid var(--line);border-radius:8px}.setBar select{width:100%}.dockSummary{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:7px 8px;border-left:3px solid var(--amber);background:var(--surface2);border-radius:6px}.dockSummary b{font-size:12px}.list,.waypoints{display:grid;gap:6px}.list article,.waypoints article{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:8px}.list article{display:flex;justify-content:space-between;align-items:center}.list article>div{display:grid;gap:3px}.list article.selected{border-color:var(--teal)}.empty{text-align:center;color:var(--muted);padding:14px}.waypointHead{display:flex;justify-content:space-between;gap:8px}.waypointHead>input{font-weight:750;flex:1}.coordinates{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:7px 0}.coordinates input{min-width:0;width:100%}.dangerText{color:#ff8b93}.recoveryCard{display:grid;grid-template-columns:minmax(170px,1fr) auto;gap:7px 10px;align-items:center;padding:8px;background:var(--surface2);border-radius:8px}.recoveryCard p{margin-top:3px}.recoveryState{display:grid;gap:2px;text-align:right}.recoveryState b{color:var(--amber)}.recoveryCard .actions{grid-column:1/-1}.details{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}.details>div{background:var(--surface2);padding:6px;border-radius:6px;min-width:0}.details b{display:block;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}.busy{position:sticky;bottom:5px;margin-top:7px;background:#203844;border:1px solid #477184;padding:8px;border-radius:7px}footer{position:sticky;bottom:5px;margin-top:7px;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--amber);color:#151515;padding:8px;border-radius:7px}footer span{color:#151515}footer button{padding:2px 7px;background:transparent;border:0;color:#151515;font-size:18px}@media(max-width:820px){main{grid-template-columns:1fr;grid-template-areas:"drive" "health" "maps" "routes"}}@media(max-width:560px){.summary{grid-template-columns:repeat(2,1fr)}.coordinates,.details{grid-template-columns:repeat(2,1fr)}.twoCol,.setBar{grid-template-columns:1fr}.dockSummary{grid-template-columns:1fr}.controlBar{flex-wrap:wrap}.controlBar span{width:100%;text-align:left}.sectionTitle{align-items:stretch;flex-direction:column}.sectionTitle>button{width:100%}.drivePad{align-items:center;flex-direction:column;text-align:center}.recoveryCard{grid-template-columns:1fr}.recoveryState{text-align:left}.recoveryCard .actions{grid-column:auto}}
   /* Three-column operator layout. These overrides intentionally come last. */
   main{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-areas:none;gap:8px}
   .driveSection,.mapsSection,.routesSection{grid-area:auto;min-width:0}

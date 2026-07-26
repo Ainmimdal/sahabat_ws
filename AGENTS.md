@@ -58,13 +58,34 @@ Canonical entry points are:
 - `bringup.launch.py` for hardware bringup without Nav2
 - `navigation.launch.py` for `odom_only`, `mapping`, or `localization`
 - `operations.launch.py` for gallery localization and patrol
+- `waypoint_editor.launch.py` for RViz waypoint editing; offline mode stores
+  per-map waypoint sets locally, live mode uses `/operator/...` services
 
 Commands documented in `PROJECT_STATUS.md` remain compatibility interfaces.
 Do not remove or redirect them until the canonical replacements have passed
 equivalent physical-robot smoke tests.
 
+## Current waypoint/ZED notes
+
+- Map ids are file stems such as `rdlfront` for
+  `~/sahabat_ws/maps/rdlfront.yaml`; do not assume every map is a directory.
+- Per-map waypoint sets are stored under
+  `~/sahabat_ws/maps/waypoint_sets/<map_id>/`.
+- The one-click live waypoint editor is `ros2 run shbat_pkg
+  live_waypoint_editor`; it starts operations, `operator_backend`, and one RViz
+  waypoint-editor window. It passes `use_zed:=true` by default; use
+  `--no-zed` only when intentionally disabling ZED.
+- ZED support uses `use_zed:=true` in `slam_nav_launch.py`,
+  `localization_patrol_launch.py`, `navigation.launch.py`, and
+  `operations.launch.py`. The configured wrapper namespace/node is
+  `zed/zed_node`, camera name `zed2i`, and the Nav2 PointCloud2 observation
+  topic is `/zed/zed_node/point_cloud/cloud_registered`.
+
 ## Files and runtime state
 
+- Do not create unnecessary Markdown files. Put new guidance in the most
+  relevant existing document whenever it fits; create a new document only when
+  the content has a distinct purpose that existing documentation cannot serve.
 - Do not delete suspected legacy source, launch, configuration, map, or vendor
   files based only on static reference searches.
 - Confirm candidates against documented commands, manual tooling, build

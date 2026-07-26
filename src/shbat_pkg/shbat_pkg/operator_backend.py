@@ -21,12 +21,17 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
-from sahabat_interfaces.msg import MapInfo, OperatorStatus, TeleopCommand
+from sahabat_interfaces.msg import MapInfo, OperatorStatus, RouteSegment
+from sahabat_interfaces.msg import TeleopCommand
 from sahabat_interfaces.msg import Waypoint
-from sahabat_interfaces.srv import ControlLease, GetWaypoints, ListMaps
+from sahabat_interfaces.msg import WaypointSetInfo
+from sahabat_interfaces.srv import ControlLease, GetWaypointGraph
+from sahabat_interfaces.srv import GetWaypoints, ListMaps
+from sahabat_interfaces.srv import ListWaypointSets, ManageWaypointSet
 from sahabat_interfaces.srv import LocalizationRecovery
 from sahabat_interfaces.srv import LoadMap, PatrolCommand, SaveMap
-from sahabat_interfaces.srv import SaveWaypoints, SetEmergencyStop, SetMode
+from sahabat_interfaces.srv import SaveDock, SaveWaypointGraph, SaveWaypoints
+from sahabat_interfaces.srv import SetEmergencyStop, SetMode
 from sensor_msgs.msg import BatteryState, Joy, LaserScan
 from slam_toolbox.srv import SaveMap as SlamSaveMap
 from slam_toolbox.srv import SerializePoseGraph
@@ -36,8 +41,11 @@ from tf2_ros import Buffer, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 import yaml
 
+from .waypoint_store import WaypointStore
+
 
 VALID_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+MAP_DOCK_WAYPOINT_ID = '__map_dock__'
 
 
 class OperatorBackend(Node):
@@ -52,6 +60,8 @@ class OperatorBackend(Node):
         self.declare_parameter('teleop_timeout', 0.25)
         self.declare_parameter('max_linear_speed', 0.50)
         self.declare_parameter('max_angular_speed', 1.20)
+        self.declare_parameter('active_map', '')
+        self.declare_parameter('localization_backend', 'amcl')
 
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)
@@ -69,6 +79,9 @@ class OperatorBackend(Node):
         self.max_angular = float(
             self.get_parameter('max_angular_speed').value
         )
+        self.localization_backend = str(
+            self.get_parameter('localization_backend').value
+        )
 
         self.lease_id = ''
         self.lease_owner = ''
@@ -78,7 +91,7 @@ class OperatorBackend(Node):
         self.last_remote_command = 0.0
         self.last_sequence = None
         self.mode = OperatorStatus.MODE_IDLE
-        self.active_map = ''
+        self.active_map = str(self.get_parameter('active_map').value)
         self.navigation_state = 'idle'
         self.active_operation = ''
         self.localization_recovery_active = False
@@ -91,6 +104,7 @@ class OperatorBackend(Node):
         self.linear_velocity = 0.0
         self.angular_velocity = 0.0
         self.current_goal_handle = None
+        self.cancel_requested = False
         self.last_map = 0.0
         self.last_scan = 0.0
         self.last_amcl_pose = 0.0
@@ -295,6 +309,18 @@ class OperatorBackend(Node):
             callback_group=self.group,
         )
         self.create_service(
+            ListWaypointSets,
+            '/operator/waypoint_sets/list',
+            self._list_waypoint_sets_service,
+            callback_group=self.group,
+        )
+        self.create_service(
+            ManageWaypointSet,
+            '/operator/waypoint_sets/manage',
+            self._manage_waypoint_set_service,
+            callback_group=self.group,
+        )
+        self.create_service(
             GetWaypoints,
             '/operator/waypoints/get',
             self._get_waypoints_service,
@@ -304,6 +330,24 @@ class OperatorBackend(Node):
             SaveWaypoints,
             '/operator/waypoints/save',
             self._save_waypoints_service,
+            callback_group=self.group,
+        )
+        self.create_service(
+            GetWaypointGraph,
+            '/operator/waypoint_graph/get',
+            self._get_waypoint_graph_service,
+            callback_group=self.group,
+        )
+        self.create_service(
+            SaveWaypointGraph,
+            '/operator/waypoint_graph/save',
+            self._save_waypoint_graph_service,
+            callback_group=self.group,
+        )
+        self.create_service(
+            SaveDock,
+            '/operator/dock/save',
+            self._save_dock_service,
             callback_group=self.group,
         )
         self.create_service(
@@ -598,12 +642,18 @@ class OperatorBackend(Node):
         message.map_healthy, message.scan_healthy, message.tf_healthy = (
             self._health()
         )
+        if self.localization_backend == 'slam_toolbox':
+            localization_pose_ok = pose_frame == 'map'
+        else:
+            localization_pose_ok = (
+                self.last_amcl_pose > 0.0
+                and self.localization_covariance_good
+            )
         message.localization_healthy = all((
             message.map_healthy,
             message.scan_healthy,
             message.tf_healthy,
-            self.last_amcl_pose > 0.0,
-            self.localization_covariance_good,
+            localization_pose_ok,
         ))
         message.diagnostic_level = (
             OperatorStatus.DIAGNOSTIC_WARN
@@ -691,28 +741,52 @@ class OperatorBackend(Node):
             raise ValueError('Map ID must use letters, numbers, _ or -')
         return self.maps_directory / map_id
 
-    def _map_info(self, directory: Path) -> MapInfo:
+    def _map_yaml_path(self, map_id: str) -> Path:
+        if not VALID_ID.fullmatch(map_id):
+            raise ValueError('Map ID must use letters, numbers, _ or -')
+        yaml_path = self.maps_directory / f'{map_id}.yaml'
+        if yaml_path.exists():
+            return yaml_path
+        return self.maps_directory / map_id / 'map.yaml'
+
+    def _remember_map(self, map_id: str) -> None:
+        if not VALID_ID.fullmatch(map_id):
+            return
+        try:
+            (self.maps_directory / 'last_selected_map').write_text(
+                f'{map_id}\n', encoding='utf-8'
+            )
+        except OSError:
+            pass
+
+    def _map_info(self, path: Path) -> MapInfo:
         info = MapInfo()
-        info.map_id = directory.name
-        info.display_name = directory.name
-        metadata = directory / 'metadata.yaml'
+        map_id = path.stem if path.is_file() else path.name
+        info.map_id = map_id
+        info.display_name = map_id
+        metadata = path.with_suffix('.metadata.yaml') if path.is_file() else path / 'metadata.yaml'
         if metadata.exists():
             try:
                 data = yaml.safe_load(metadata.read_text()) or {}
-                info.display_name = str(data.get('display_name', directory.name))
+                info.display_name = str(data.get('display_name', map_id))
             except (OSError, yaml.YAMLError):
                 pass
-        info.directory = str(directory)
+        info.directory = str(path.parent if path.is_file() else path)
+        session_base = path.with_suffix('') if path.is_file() else path / 'session'
         info.has_editable_session = all((
-            (directory / 'session.posegraph').exists(),
-            (directory / 'session.data').exists(),
+            session_base.with_suffix('.posegraph').exists(),
+            session_base.with_suffix('.data').exists(),
         ))
-        stamp = directory.stat().st_mtime
+        stamp = path.stat().st_mtime
         info.modified_at.sec = int(stamp)
         info.modified_at.nanosec = int((stamp - int(stamp)) * 1_000_000_000)
         return info
 
     def _list_maps_service(self, _request, response):
+        yaml_files = sorted(
+            path for path in self.maps_directory.glob('*.yaml')
+            if not path.name.startswith('.') and path.name != 'dock.yaml'
+        )
         directories = sorted(
             path for path in self.maps_directory.iterdir()
             if all((
@@ -721,7 +795,15 @@ class OperatorBackend(Node):
                 (path / 'map.yaml').exists(),
             ))
         )
-        response.maps = [self._map_info(path) for path in directories]
+        seen = set()
+        maps = []
+        for path in yaml_files + directories:
+            map_id = path.stem if path.is_file() else path.name
+            if map_id in seen:
+                continue
+            seen.add(map_id)
+            maps.append(self._map_info(path))
+        response.maps = maps
         response.active_map = self.active_map
         response.message = f'{len(response.maps)} map(s) available'
         return response
@@ -793,7 +875,7 @@ class OperatorBackend(Node):
             response.message = 'A valid control lease is required'
             return response
         try:
-            yaml_path = self._map_directory(request.map_id) / 'map.yaml'
+            yaml_path = self._map_yaml_path(request.map_id)
         except ValueError as error:
             response.message = str(error)
             return response
@@ -816,37 +898,157 @@ class OperatorBackend(Node):
             response.message = 'Nav2 rejected the selected map'
             return response
         self.active_map = request.map_id
+        self._remember_map(request.map_id)
         response.success = True
         response.yaml_path = str(yaml_path)
         response.message = 'Map loaded; set initial pose before clearing E-stop'
         return response
 
-    def _waypoint_file(self, map_id: str) -> Path:
-        return self._map_directory(map_id) / 'waypoints.yaml'
+    def _waypoint_store(self, map_id: str) -> WaypointStore:
+        if not VALID_ID.fullmatch(map_id):
+            raise ValueError('Invalid map id')
+        return WaypointStore(
+            self.maps_directory,
+            sets_directory=self.maps_directory / 'waypoint_sets' / map_id,
+            legacy_path=self.maps_directory / f'{map_id}_waypoints.yaml',
+            dock_path=self.maps_directory / 'waypoint_sets' / map_id / 'dock.yaml',
+        )
 
-    def _read_waypoints(self, map_id: str):
-        path = self._waypoint_file(map_id)
-        if not path.exists():
-            return 0, []
-        data = yaml.safe_load(path.read_text()) or {}
-        revision = int(data.get('revision', 0))
-        messages = []
-        for item in data.get('waypoints', []):
-            waypoint = Waypoint()
-            waypoint.id = str(item.get('id') or uuid.uuid4().hex)
-            waypoint.name = str(item.get('name') or 'waypoint')
-            waypoint.pose.x = float(item.get('x', 0.0))
-            waypoint.pose.y = float(item.get('y', 0.0))
-            waypoint.pose.theta = float(item.get('yaw', 0.0))
-            waypoint.dwell_seconds = float(item.get('dwell_seconds', 0.0))
-            waypoint.enabled = bool(item.get('enabled', True))
-            messages.append(waypoint)
-        return revision, messages
+    def _read_waypoints(self, map_id: str, set_id: str = ''):
+        revision, items = self._waypoint_store(map_id).read_set(set_id)
+        return revision, [self._waypoint_message(item) for item in items]
+
+    def _read_waypoint_graph(self, map_id: str, set_id: str = ''):
+        revision, items, segments, _settings = self._waypoint_store(
+            map_id
+        ).read_graph(set_id)
+        waypoint_messages = [self._waypoint_message(item) for item in items]
+        segment_messages = []
+        for item in segments:
+            segment = RouteSegment()
+            segment.id = str(item.get('id') or uuid.uuid4().hex)
+            segment.name = str(item.get('name') or 'route')
+            segment.from_waypoint_id = str(item.get('from_waypoint_id') or '')
+            segment.to_waypoint_id = str(item.get('to_waypoint_id') or '')
+            segment.bidirectional = bool(item.get('bidirectional', False))
+            segment.enabled = bool(item.get('enabled', True))
+            segment.via_points = [
+                self._waypoint_message(waypoint)
+                for waypoint in item.get('via_points', [])
+            ]
+            segment_messages.append(segment)
+        return revision, waypoint_messages, segment_messages
+
+    @staticmethod
+    def _waypoint_message(item):
+        waypoint = Waypoint()
+        waypoint.id = str(item.get('id') or uuid.uuid4().hex)
+        waypoint.name = str(item.get('name') or 'waypoint')
+        waypoint.pose.x = float(item.get('x', 0.0))
+        waypoint.pose.y = float(item.get('y', 0.0))
+        waypoint.pose.theta = float(item.get('yaw', 0.0))
+        waypoint.dwell_seconds = float(item.get('dwell_seconds', 0.0))
+        waypoint.enabled = bool(item.get('enabled', True))
+        return waypoint
+
+    @staticmethod
+    def _waypoint_data(item):
+        return {
+            'id': item.id or uuid.uuid4().hex,
+            'name': item.name,
+            'x': item.pose.x,
+            'y': item.pose.y,
+            'yaw': item.pose.theta,
+            'dwell_seconds': item.dwell_seconds,
+            'enabled': item.enabled,
+        }
+
+    @staticmethod
+    def _segment_data(item):
+        return {
+            'id': item.id or uuid.uuid4().hex,
+            'name': item.name,
+            'from_waypoint_id': item.from_waypoint_id,
+            'to_waypoint_id': item.to_waypoint_id,
+            'bidirectional': item.bidirectional,
+            'enabled': item.enabled,
+            'via_points': [
+                OperatorBackend._waypoint_data(waypoint)
+                for waypoint in item.via_points
+            ],
+        }
+
+    def _list_waypoint_sets_service(self, request, response):
+        try:
+            store = self._waypoint_store(request.map_id)
+            response.active_set_id = store.active_set_id()
+            for item in store.list_sets():
+                info = WaypointSetInfo()
+                info.id = item['id']
+                info.name = item['name']
+                info.revision = item['revision']
+                info.waypoint_count = item['waypoint_count']
+                response.sets.append(info)
+            dock = store.load_dock()
+            if dock:
+                response.has_dock = True
+                response.dock.id = str(dock.get('id') or 'dock')
+                response.dock.name = 'dock'
+                response.dock.pose.x = float(dock.get('x', 0.0))
+                response.dock.pose.y = float(dock.get('y', 0.0))
+                response.dock.pose.theta = float(dock.get('yaw', 0.0))
+                response.dock.enabled = True
+            response.message = f'{len(response.sets)} waypoint set(s) loaded'
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            response.message = str(error)
+        return response
+
+    def _manage_waypoint_set_service(self, request, response):
+        if not self._lease_valid(request.lease_id):
+            response.message = 'A valid control lease is required'
+            return response
+        if (
+            request.action in (
+                ManageWaypointSet.Request.DELETE,
+                ManageWaypointSet.Request.SELECT,
+            )
+            and self.navigation_state in ('navigating', 'patrolling')
+        ):
+            response.message = 'Stop navigation before changing waypoint sets'
+            return response
+        try:
+            store = self._waypoint_store(request.map_id)
+            if request.action == ManageWaypointSet.Request.CREATE:
+                response.set_id = store.create_set(request.name)
+            elif request.action == ManageWaypointSet.Request.RENAME:
+                store.rename_set(request.set_id, request.name)
+                response.set_id = request.set_id
+            elif request.action == ManageWaypointSet.Request.DELETE:
+                store.delete_set(request.set_id)
+                response.set_id = request.set_id
+            elif request.action == ManageWaypointSet.Request.SELECT:
+                store.select_set(request.set_id)
+                response.set_id = request.set_id
+            else:
+                response.message = 'Unknown waypoint-set action'
+                return response
+            response.active_set_id = store.active_set_id()
+            response.success = True
+            response.message = 'Waypoint set updated'
+            self.marker_refresh_pub.publish(String(data=request.map_id))
+            self._publish_waypoint_markers()
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            response.message = str(error)
+        return response
 
     def _get_waypoints_service(self, request, response):
         try:
             response.revision, response.waypoints = self._read_waypoints(
-                request.map_id
+                request.map_id, request.set_id
+            )
+            response.set_id = (
+                request.set_id
+                or self._waypoint_store(request.map_id).active_set_id()
             )
             response.message = f'{len(response.waypoints)} waypoint(s) loaded'
         except (OSError, ValueError, yaml.YAMLError) as error:
@@ -858,37 +1060,100 @@ class OperatorBackend(Node):
             response.message = 'A valid control lease is required'
             return response
         try:
-            current, _waypoints = self._read_waypoints(request.map_id)
+            store = self._waypoint_store(request.map_id)
+            set_id = request.set_id or store.active_set_id()
+            current, _waypoints = self._read_waypoints(request.map_id, set_id)
             if request.expected_revision != current:
                 response.revision = current
                 response.message = 'Waypoint set changed; reload before saving'
                 return response
-            path = self._waypoint_file(request.map_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            revision = current + 1
-            data = {
-                'revision': revision,
-                'waypoints': [
-                    {
-                        'id': item.id or uuid.uuid4().hex,
-                        'name': item.name,
-                        'x': round(item.pose.x, 3),
-                        'y': round(item.pose.y, 3),
-                        'yaw': round(item.pose.theta, 3),
-                        'dwell_seconds': round(item.dwell_seconds, 2),
-                        'enabled': item.enabled,
-                    }
-                    for item in request.waypoints
-                ],
-            }
-            temporary = path.with_suffix('.yaml.tmp')
-            temporary.write_text(yaml.safe_dump(data, sort_keys=False))
-            temporary.replace(path)
+            revision = store.save_set(
+                set_id,
+                current,
+                [self._waypoint_data(item) for item in request.waypoints],
+            )
             response.success = True
             response.revision = revision
+            response.set_id = set_id
             response.message = f'{len(request.waypoints)} waypoint(s) saved'
             self.marker_refresh_pub.publish(String(data=request.map_id))
             self._publish_waypoint_markers()
+        except RuntimeError as error:
+            if str(error).startswith('revision:'):
+                response.revision = int(str(error).split(':', 1)[1])
+                response.message = 'Waypoint set changed; reload before saving'
+            else:
+                response.message = str(error)
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            response.message = str(error)
+        return response
+
+    def _get_waypoint_graph_service(self, request, response):
+        try:
+            response.revision, response.waypoints, response.segments = (
+                self._read_waypoint_graph(request.map_id, request.set_id)
+            )
+            response.set_id = (
+                request.set_id
+                or self._waypoint_store(request.map_id).active_set_id()
+            )
+            response.message = (
+                f'{len(response.waypoints)} waypoint(s), '
+                f'{len(response.segments)} route segment(s) loaded'
+            )
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            response.message = str(error)
+        return response
+
+    def _save_waypoint_graph_service(self, request, response):
+        if not self._lease_valid(request.lease_id):
+            response.message = 'A valid control lease is required'
+            return response
+        try:
+            store = self._waypoint_store(request.map_id)
+            set_id = request.set_id or store.active_set_id()
+            current, _waypoints, _segments = self._read_waypoint_graph(
+                request.map_id, set_id
+            )
+            if request.expected_revision != current:
+                response.revision = current
+                response.message = 'Waypoint graph changed; reload before saving'
+                return response
+            revision = store.save_graph(
+                set_id,
+                current,
+                [self._waypoint_data(item) for item in request.waypoints],
+                [self._segment_data(item) for item in request.segments],
+            )
+            response.success = True
+            response.revision = revision
+            response.set_id = set_id
+            response.message = (
+                f'{len(request.waypoints)} waypoint(s), '
+                f'{len(request.segments)} route segment(s) saved'
+            )
+            self.marker_refresh_pub.publish(String(data=request.map_id))
+            self._publish_waypoint_markers()
+        except RuntimeError as error:
+            if str(error).startswith('revision:'):
+                response.revision = int(str(error).split(':', 1)[1])
+                response.message = 'Waypoint graph changed; reload before saving'
+            else:
+                response.message = str(error)
+        except (OSError, ValueError, yaml.YAMLError) as error:
+            response.message = str(error)
+        return response
+
+    def _save_dock_service(self, request, response):
+        if not self._lease_valid(request.lease_id):
+            response.message = 'A valid control lease is required'
+            return response
+        try:
+            self._waypoint_store(request.map_id).save_dock(
+                self._waypoint_data(request.dock)
+            )
+            response.success = True
+            response.message = 'Dock saved for this map'
         except (OSError, ValueError, yaml.YAMLError) as error:
             response.message = str(error)
         return response
@@ -939,8 +1204,10 @@ class OperatorBackend(Node):
             PatrolCommand.Request.STOP,
             PatrolCommand.Request.PAUSE,
         ):
+            self.cancel_requested = True
             if self.current_goal_handle is not None:
                 self.current_goal_handle.cancel_goal_async()
+                self.current_goal_handle = None
             self.navigation_state = (
                 'paused'
                 if request.command == PatrolCommand.Request.PAUSE
@@ -950,7 +1217,28 @@ class OperatorBackend(Node):
             response.message = self.navigation_state
             return response
         try:
-            _revision, waypoints = self._read_waypoints(self.active_map)
+            store = self._waypoint_store(self.active_map)
+            if (
+                request.command == PatrolCommand.Request.NAVIGATE
+                and request.waypoint_id == MAP_DOCK_WAYPOINT_ID
+            ):
+                dock_data = store.load_dock()
+                if not dock_data:
+                    response.message = 'This map has no dock pose'
+                    return response
+                dock = Waypoint()
+                dock.id = MAP_DOCK_WAYPOINT_ID
+                dock.name = 'dock'
+                dock.pose.x = float(dock_data.get('x', 0.0))
+                dock.pose.y = float(dock_data.get('y', 0.0))
+                dock.pose.theta = float(dock_data.get('yaw', 0.0))
+                dock.enabled = True
+                waypoints = [dock]
+            else:
+                set_id = request.set_id or store.active_set_id()
+                _revision, waypoints = self._read_waypoints(
+                    self.active_map, set_id
+                )
         except (OSError, ValueError, yaml.YAMLError) as error:
             response.message = str(error)
             return response
@@ -963,6 +1251,7 @@ class OperatorBackend(Node):
             if not self.navigate_client.wait_for_server(timeout_sec=1.0):
                 response.message = 'NavigateToPose action unavailable'
                 return response
+            self.cancel_requested = False
             goal = NavigateToPose.Goal()
             goal.pose = self._pose_from_waypoint(selected)
             future = self.navigate_client.send_goal_async(goal)
@@ -975,6 +1264,7 @@ class OperatorBackend(Node):
             if not self.patrol_client.wait_for_server(timeout_sec=1.0):
                 response.message = 'FollowWaypoints action unavailable'
                 return response
+            self.cancel_requested = False
             goal = FollowWaypoints.Goal()
             goal.poses = [self._pose_from_waypoint(item) for item in enabled]
             future = self.patrol_client.send_goal_async(goal)
@@ -999,6 +1289,12 @@ class OperatorBackend(Node):
             handle = future.result()
             if not handle.accepted:
                 self.navigation_state = 'rejected'
+                return
+            if self.cancel_requested or self.navigation_state not in (
+                'navigating',
+                'patrolling',
+            ):
+                handle.cancel_goal_async()
                 return
             self.current_goal_handle = handle
             result = handle.get_result_async()

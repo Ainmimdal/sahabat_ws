@@ -31,6 +31,8 @@ foxglove_bridge:
       - ^/operator/set_mode$
       - ^/operator/maps/.*$
       - ^/operator/waypoints/.*$
+      - ^/operator/waypoint_sets/.*$
+      - ^/operator/dock/.*$
       - ^/operator/patrol$
       - ^/operator/localization/recovery$
     param_whitelist: ['^(?!)$']

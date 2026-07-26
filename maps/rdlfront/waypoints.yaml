@@ -1,0 +1,23 @@
+revision: 0
+waypoints:
+- id: 0
+  name: "dock"
+  x: -2.946
+  y: -0.504
+  yaw: 0.243
+  dwell_seconds: 0.0
+  enabled: true
+- id: 1
+  name: "Waypoint 2"
+  x: -1.266
+  y: -0.429
+  yaw: 0.243
+  dwell_seconds: 0.0
+  enabled: true
+- id: 2
+  name: "waypoint_3"
+  x: 0.629128
+  y: 0.429654
+  yaw: 0.721655
+  dwell_seconds: 0.0
+  enabled: true

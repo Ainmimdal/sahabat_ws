@@ -40,15 +40,19 @@ from launch_ros.actions import Node, SetParameter
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import xacro
 
-# Import USB detection from main launch
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-try:
-    from sahabat_launch import smart_detect_devices
-    lidar_port, imu_port, motor_port = smart_detect_devices()
-except Exception as e:
-    print(f"Warning: Could not import device detection: {e}")
+# Import USB detection from main launch unless an inspection command requested
+# no hardware probing.
+if os.environ.get('SAHABAT_SKIP_DEVICE_DETECTION') == '1':
     lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+else:
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        from sahabat_launch import smart_detect_devices
+        lidar_port, imu_port, motor_port = smart_detect_devices()
+    except Exception as e:
+        print(f"Warning: Could not import device detection: {e}")
+        lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
 
 
 def generate_launch_description():
@@ -145,7 +149,7 @@ def generate_launch_description():
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
             {'decel_time_ms': 200},
-            {'max_linear_vel': 0.5},        # Limited for Nav2 testing
+            {'max_linear_vel': 0.5},        # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
             {'odom_rate': 20.0},
@@ -169,7 +173,7 @@ def generate_launch_description():
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
             {'decel_time_ms': 200},
-            {'max_linear_vel': 0.5},
+            {'max_linear_vel': 0.5},        # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
             {'odom_rate': 20.0},

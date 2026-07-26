@@ -205,7 +205,7 @@ local_costmap:
           obstacle_max_range: 9.0
           obstacle_min_range: 0.25
         point_cloud:
-          topic: /zed2i/zed_node/point_cloud/cloud_registered
+          topic: /zed/zed_node/point_cloud/cloud_registered
           max_obstacle_height: 2.0
           min_obstacle_height: 0.40
           clearing: True
@@ -250,7 +250,7 @@ global_costmap:
           obstacle_max_range: 9.0
           obstacle_min_range: 0.25
         point_cloud:
-          topic: /zed2i/zed_node/point_cloud/cloud_registered
+          topic: /zed/zed_node/point_cloud/cloud_registered
           max_obstacle_height: 2.0
           min_obstacle_height: 0.40
           clearing: True

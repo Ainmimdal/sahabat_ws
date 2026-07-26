@@ -1,0 +1,6 @@
+string map_id
+sahabat_interfaces/Waypoint dock
+string lease_id
+---
+bool success
+string message

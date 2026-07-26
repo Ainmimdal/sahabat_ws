@@ -1,0 +1,24 @@
+name: Default
+revision: 1
+waypoints:
+- id: 532f2d2c409c427dbce496e31331cf9b
+  name: waypoint_1
+  x: 0.87
+  y: -0.638
+  yaw: -0.029
+  dwell_seconds: 0.0
+  enabled: true
+- id: b92293697d1148d791758467fb9311d2
+  name: waypoint_2
+  x: 2.046
+  y: -0.006
+  yaw: 0.0
+  dwell_seconds: 0.0
+  enabled: true
+- id: 7e37c0b5cf3543a48570c2c843577201
+  name: waypoint_3
+  x: 4.473
+  y: -0.517
+  yaw: 1.575
+  dwell_seconds: 0.0
+  enabled: true

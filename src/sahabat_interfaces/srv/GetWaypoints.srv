@@ -1,5 +1,7 @@
 string map_id
+string set_id
 ---
 uint64 revision
 sahabat_interfaces/Waypoint[] waypoints
+string set_id
 string message

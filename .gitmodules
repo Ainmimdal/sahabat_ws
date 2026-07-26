@@ -1,0 +1,12 @@
+[submodule "src/serial-ros2"]
+	path = src/serial-ros2
+	url = https://github.com/RoverRobotics-forks/serial-ros2.git
+[submodule "src/zed-ros2-wrapper"]
+	path = src/zed-ros2-wrapper
+	url = https://github.com/stereolabs/zed-ros2-wrapper.git
+[submodule "src/zed-ros2-examples"]
+	path = src/zed-ros2-examples
+	url = https://github.com/stereolabs/zed-ros2-examples.git
+[submodule "src/waypoint_editor"]
+	path = src/waypoint_editor
+	url = https://github.com/Ainmimdal/waypoint_editor.git

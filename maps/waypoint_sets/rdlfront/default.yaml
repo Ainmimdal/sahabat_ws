@@ -1,0 +1,10 @@
+name: Set 1
+revision: 17
+waypoints:
+- id: '0'
+  name: Waypoint 2
+  x: -1.027
+  y: 1.895
+  yaw: 1.059
+  dwell_seconds: 0.0
+  enabled: true

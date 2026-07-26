@@ -28,19 +28,28 @@ slam_toolbox:
     # Start pose (will be overridden by initial pose if set)
     map_start_at_dock: true
 
-    # Timing
-    transform_timeout: 0.2
+    # Timing. Keep TF publishing responsive enough for Nav2 without overloading
+    # the Orin Nano or reacting to every tiny scan-matching fluctuation.
+    transform_publish_period: 0.05
+    transform_timeout: 0.5
     tf_buffer_duration: 30.0
     throttle_scans: 1
+    minimum_time_interval: 0.1
+    map_update_interval: 1.0
     
     # Resolution (should match the saved map)
     resolution: 0.05
-    max_laser_range: 12.0
+    max_laser_range: 8.0
+    laser_min_range: 0.15
+    laser_max_range: 8.0
     
-    # Scan matching - tighter for localization
-    scan_buffer_size: 10
-    scan_buffer_maximum_scan_distance: 10.0
-    link_match_minimum_response_fine: 0.1
+    # Scan matching. These are close to the proven mapping settings but keep
+    # loop closure disabled so localization does not reshape the saved map.
+    minimum_travel_distance: 0.2
+    minimum_travel_heading: 0.1
+    scan_buffer_size: 5
+    scan_buffer_maximum_scan_distance: 8.0
+    link_match_minimum_response_fine: 0.15
     link_scan_maximum_distance: 1.5
     
     # No loop closing in localization mode
@@ -52,15 +61,16 @@ slam_toolbox:
     correlation_search_space_smear_deviation: 0.1
 
     # Scan matcher parameters
-    distance_variance_penalty: 0.5
-    angle_variance_penalty: 1.0
+    distance_variance_penalty: 0.3
+    angle_variance_penalty: 0.8
 
-    fine_search_angle_offset: 0.00349
-    coarse_search_angle_offset: 0.349
-    coarse_angle_resolution: 0.0349
-    minimum_angle_penalty: 0.9
-    minimum_distance_penalty: 0.5
+    fine_search_angle_offset: 0.00523
+    coarse_search_angle_offset: 0.524
+    coarse_angle_resolution: 0.0262
+    minimum_angle_penalty: 0.85
+    minimum_distance_penalty: 0.4
     use_response_expansion: true
+    enable_interactive_mode: true
 
     # State
     debug_logging: false

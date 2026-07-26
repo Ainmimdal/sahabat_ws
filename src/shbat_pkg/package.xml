@@ -72,6 +72,7 @@
 <exec_depend>foxglove_bridge</exec_depend>
 <exec_depend>rosidl_runtime_py</exec_depend>
 <exec_depend>shbat_rviz_plugins</exec_depend>
+<exec_depend>waypoint_editor</exec_depend>
 
 <!-- Motor driver dependencies -->
 <exec_depend>python3-numpy</exec_depend>
