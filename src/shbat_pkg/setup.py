@@ -45,6 +45,8 @@ setup(
             'config/nav2_params.yaml',
             'config/nav2_params_odom.yaml',
             'config/nav2_odom_only.yaml',
+            'config/nav2_localization_overrides.yaml',
+            'config/nav2_keepout_overrides.yaml',
             'config/zed_pos_tracking_override.yaml',
             'config/ekf.yaml',
             'config/amcl.yaml',

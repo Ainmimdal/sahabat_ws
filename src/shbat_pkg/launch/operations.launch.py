@@ -22,6 +22,8 @@ def generate_launch_description():
         ('maps_directory', '~/sahabat_ws/maps'),
         ('map_id', ''),
         ('use_zed', 'false'),
+        ('use_keepout', 'true'),
+        ('keepout_mask_file', ''),
         ('use_rviz', 'true'),
         ('use_foxglove', 'false'),
         ('use_api', 'false'),

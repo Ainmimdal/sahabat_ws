@@ -1,0 +1,12 @@
+# Saved-map localization must plan within the surveyed occupancy map.
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      rolling_window: false
+      track_unknown_space: true
+      plugins: ["static_layer", "voxel_layer", "inflation_layer"]
+
+planner_server:
+  ros__parameters:
+    GridBased:
+      allow_unknown: false

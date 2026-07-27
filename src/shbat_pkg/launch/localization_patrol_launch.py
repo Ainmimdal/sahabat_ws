@@ -72,6 +72,20 @@ def generate_launch_description():
     )
     use_zed = LaunchConfiguration('use_zed')
 
+    use_keepout_arg = DeclareLaunchArgument(
+        'use_keepout',
+        default_value='true',
+        description='Use the map keepout mask when available',
+    )
+    use_keepout = LaunchConfiguration('use_keepout')
+
+    keepout_mask_file_arg = DeclareLaunchArgument(
+        'keepout_mask_file',
+        default_value='',
+        description='Optional explicit keepout mask YAML path',
+    )
+    keepout_mask_file = LaunchConfiguration('keepout_mask_file')
+
     localization_backend_arg = DeclareLaunchArgument(
         'localization_backend',
         default_value='amcl',
@@ -183,6 +197,8 @@ def generate_launch_description():
             'maps_directory': maps_directory,
             'map_id': map_id,
             'use_zed': use_zed,
+            'use_keepout': use_keepout,
+            'keepout_mask_file': keepout_mask_file,
             'localization_backend': localization_backend,
             'use_rviz': use_rviz,
             'use_foxglove': use_foxglove,
@@ -266,6 +282,8 @@ def generate_launch_description():
         maps_directory_arg,
         map_id_arg,
         use_zed_arg,
+        use_keepout_arg,
+        keepout_mask_file_arg,
         localization_backend_arg,
         use_rviz_arg,
         use_foxglove_arg,

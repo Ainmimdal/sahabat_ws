@@ -22,6 +22,8 @@ def generate_launch_description():
     use_ekf = LaunchConfiguration('use_ekf')
     use_rviz = LaunchConfiguration('use_rviz')
     use_zed = LaunchConfiguration('use_zed')
+    use_keepout = LaunchConfiguration('use_keepout')
+    keepout_mask_file = LaunchConfiguration('keepout_mask_file')
     localization_backend = LaunchConfiguration('localization_backend')
     continue_mapping = LaunchConfiguration('continue_mapping')
     use_foxglove = LaunchConfiguration('use_foxglove')
@@ -44,6 +46,8 @@ def generate_launch_description():
         DeclareLaunchArgument('use_ekf', default_value='true'),
         DeclareLaunchArgument('use_rviz', default_value='true'),
         DeclareLaunchArgument('use_zed', default_value='false'),
+        DeclareLaunchArgument('use_keepout', default_value='true'),
+        DeclareLaunchArgument('keepout_mask_file', default_value=''),
         DeclareLaunchArgument(
             'localization_backend',
             default_value='amcl',
@@ -82,6 +86,8 @@ def generate_launch_description():
             'map_file': map_file,
             'use_rviz': use_rviz,
             'use_zed': use_zed,
+            'use_keepout': use_keepout,
+            'keepout_mask_file': keepout_mask_file,
             'localization_backend': localization_backend,
             'continue_mapping': continue_mapping,
             'use_foxglove': use_foxglove,

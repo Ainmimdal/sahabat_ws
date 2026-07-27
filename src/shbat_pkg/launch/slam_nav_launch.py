@@ -30,7 +30,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument,
+    GroupAction,
+    LogInfo,
+    OpaqueFunction,
+)
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition, UnlessCondition
 from launch_ros.actions import Node, ComposableNodeContainer
@@ -94,6 +99,52 @@ def load_dock_pose(maps_directory, map_id):
     return None
 
 
+def _map_yaml_path(map_file):
+    path = Path(map_file).expanduser()
+    if path.suffix == '.yaml':
+        return path
+    if path.is_dir():
+        return path / 'map.yaml'
+    return path.with_suffix('.yaml')
+
+
+def _keepout_candidates(map_file):
+    map_yaml = _map_yaml_path(map_file)
+    map_stem = map_yaml.with_suffix('')
+    candidates = [
+        map_stem.with_name(f'{map_stem.name}_keepout.yaml'),
+    ]
+    if map_yaml.name == 'map.yaml':
+        candidates.insert(0, map_yaml.parent / 'keepout.yaml')
+    else:
+        candidates.append(map_yaml.parent / map_stem.name / 'keepout.yaml')
+    return map_yaml, candidates
+
+
+def _validate_keepout_metadata(map_yaml, keepout_yaml):
+    try:
+        map_data = yaml.safe_load(map_yaml.read_text(encoding='utf-8')) or {}
+        mask_data = yaml.safe_load(
+            keepout_yaml.read_text(encoding='utf-8')
+        ) or {}
+    except (OSError, yaml.YAMLError) as error:
+        raise RuntimeError(f'Could not read keepout mask metadata: {error}')
+
+    for key in ('resolution', 'origin'):
+        if map_data.get(key) != mask_data.get(key):
+            raise RuntimeError(
+                f'Keepout mask {key} must match {map_yaml}'
+            )
+    origin = mask_data.get('origin', [])
+    if len(origin) < 3 or float(origin[2]) != 0.0:
+        raise RuntimeError('Keepout mask origin yaw must be 0.0')
+    image = Path(str(mask_data.get('image', '')))
+    if not image.is_absolute():
+        image = keepout_yaml.parent / image
+    if not image.is_file():
+        raise RuntimeError(f'Keepout mask image does not exist: {image}')
+
+
 def generate_launch_description():
 
     pkg_name = 'shbat_pkg'
@@ -128,6 +179,21 @@ def generate_launch_description():
         description='Saved map file stem, e.g. rdlfront'
     )
     map_id = LaunchConfiguration('map_id')
+
+    use_keepout_arg = DeclareLaunchArgument(
+        'use_keepout',
+        default_value='true',
+        description='Use a per-map keepout mask when one is available',
+    )
+    use_keepout = LaunchConfiguration('use_keepout')
+
+    keepout_mask_file_arg = DeclareLaunchArgument(
+        'keepout_mask_file',
+        default_value='',
+        description='Optional explicit keepout mask YAML path',
+    )
+    keepout_mask_file = LaunchConfiguration('keepout_mask_file')
+    keepout_enabled = LaunchConfiguration('keepout_enabled')
 
     use_lidar_arg = DeclareLaunchArgument(
         'use_lidar',
@@ -622,6 +688,95 @@ def generate_launch_description():
         ]))
     )
 
+    def keepout_setup(context, *_args, **_kwargs):
+        context.launch_configurations['keepout_enabled'] = 'false'
+        if mode.perform(context) != 'localization':
+            return []
+        if use_keepout.perform(context).lower() not in ('true', '1', 'yes', 'on'):
+            return []
+
+        explicit = keepout_mask_file.perform(context).strip()
+        map_value = map_file.perform(context).strip()
+        if not map_value:
+            if explicit:
+                raise RuntimeError(
+                    'keepout_mask_file requires a localization map_file'
+                )
+            return []
+
+        map_yaml, candidates = _keepout_candidates(map_value)
+        if explicit:
+            mask_yaml = Path(explicit).expanduser()
+            if mask_yaml.suffix != '.yaml':
+                mask_yaml = mask_yaml.with_suffix('.yaml')
+            if not mask_yaml.is_file():
+                raise RuntimeError(
+                    f'Explicit keepout mask does not exist: {mask_yaml}'
+                )
+        else:
+            mask_yaml = next(
+                (candidate for candidate in candidates if candidate.is_file()),
+                None,
+            )
+            if mask_yaml is None:
+                return [LogInfo(msg='No keepout mask found; filter disabled')]
+
+        if not map_yaml.is_file():
+            raise RuntimeError(
+                f'Cannot validate keepout mask; map YAML is missing: {map_yaml}'
+            )
+        _validate_keepout_metadata(map_yaml, mask_yaml)
+        context.launch_configurations['keepout_enabled'] = 'true'
+
+        filter_mask_server = Node(
+            package='nav2_map_server',
+            executable='map_server',
+            name='keepout_filter_mask_server',
+            output='screen',
+            parameters=[{
+                'use_sim_time': False,
+                'yaml_filename': str(mask_yaml),
+                'topic_name': 'keepout_filter_mask',
+                'frame_id': 'map',
+            }],
+        )
+        filter_info_server = Node(
+            package='nav2_map_server',
+            executable='costmap_filter_info_server',
+            name='keepout_costmap_filter_info_server',
+            output='screen',
+            parameters=[{
+                'use_sim_time': False,
+                'type': 0,
+                'filter_info_topic': 'keepout_costmap_filter_info',
+                'mask_topic': 'keepout_filter_mask',
+                'base': 0.0,
+                'multiplier': 1.0,
+            }],
+        )
+        lifecycle_manager = Node(
+            package='nav2_lifecycle_manager',
+            executable='lifecycle_manager',
+            name='lifecycle_manager_keepout_filter',
+            output='screen',
+            parameters=[{
+                'use_sim_time': False,
+                'autostart': True,
+                'node_names': [
+                    'keepout_filter_mask_server',
+                    'keepout_costmap_filter_info_server',
+                ],
+            }],
+        )
+        return [
+            LogInfo(msg=f'Using keepout mask: {mask_yaml}'),
+            filter_mask_server,
+            filter_info_server,
+            lifecycle_manager,
+        ]
+
+    keepout_nodes = OpaqueFunction(function=keepout_setup)
+
     slam_config_localization = os.path.join(
         pkg_share, 'config', 'slam_toolbox_localization.yaml'
     )
@@ -751,6 +906,30 @@ def generate_launch_description():
     # ========== Nav2 Stack ==========
 
     nav2_config = os.path.join(pkg_share, 'config', 'nav2_odom_only.yaml')
+    nav2_localization_overrides = os.path.join(
+        pkg_share,
+        'config',
+        'nav2_localization_overrides.yaml',
+    )
+    nav2_keepout_overrides = os.path.join(
+        pkg_share,
+        'config',
+        'nav2_keepout_overrides.yaml',
+    )
+    nav2_mode_overrides = PythonExpression([
+        "'", nav2_localization_overrides, "' if '", mode,
+        "' == 'localization' else '", nav2_config, "'",
+    ])
+    nav2_filter_overrides = PythonExpression([
+        "'", nav2_keepout_overrides, "' if '", keepout_enabled,
+        "' == 'true' else '", nav2_localization_overrides,
+        "' if '", mode, "' == 'localization' else '", nav2_config, "'",
+    ])
+    nav2_parameters = [
+        nav2_config,
+        nav2_mode_overrides,
+        nav2_filter_overrides,
+    ]
     nav_to_pose_bt = os.path.join(
         pkg_share,
         'behavior_trees',
@@ -772,7 +951,7 @@ def generate_launch_description():
         executable='controller_server',
         name='controller_server',
         output='screen',
-        parameters=[nav2_config],
+        parameters=nav2_parameters,
         remappings=[('cmd_vel', 'cmd_vel_nav')]
     )
 
@@ -781,7 +960,7 @@ def generate_launch_description():
         executable='planner_server',
         name='planner_server',
         output='screen',
-        parameters=[nav2_config]
+        parameters=nav2_parameters
     )
 
     nav2_smoother = Node(
@@ -789,7 +968,7 @@ def generate_launch_description():
         executable='smoother_server',
         name='smoother_server',
         output='screen',
-        parameters=[nav2_config]
+        parameters=nav2_parameters
     )
 
     nav2_behaviors = Node(
@@ -797,7 +976,7 @@ def generate_launch_description():
         executable='behavior_server',
         name='behavior_server',
         output='screen',
-        parameters=[nav2_config]
+        parameters=nav2_parameters
     )
 
     nav2_bt_navigator = Node(
@@ -806,7 +985,7 @@ def generate_launch_description():
         name='bt_navigator',
         output='screen',
         parameters=[
-            nav2_config,
+            *nav2_parameters,
             {'default_nav_to_pose_bt_xml': nav_to_pose_bt},
         ]
     )
@@ -816,7 +995,7 @@ def generate_launch_description():
         executable='waypoint_follower',
         name='waypoint_follower',
         output='screen',
-        parameters=[nav2_config]
+        parameters=nav2_parameters
     )
 
     nav2_velocity_smoother = Node(
@@ -824,7 +1003,7 @@ def generate_launch_description():
         executable='velocity_smoother',
         name='velocity_smoother',
         output='screen',
-        parameters=[nav2_config],
+        parameters=nav2_parameters,
         remappings=[
             ('cmd_vel', 'cmd_vel_nav'),
             ('cmd_vel_smoothed', smoothed_cmd_topic)
@@ -919,6 +1098,8 @@ def generate_launch_description():
         map_file_arg,
         maps_directory_arg,
         map_id_arg,
+        use_keepout_arg,
+        keepout_mask_file_arg,
         use_lidar_arg,
         use_imu_arg,
         use_rviz_arg,
@@ -970,6 +1151,7 @@ def generate_launch_description():
         amcl_node,
         lifecycle_manager_localization,
         slam_toolbox_localization,
+        keepout_nodes,
 
         # Auto pose saver (localization mode only)
         auto_pose_saver,

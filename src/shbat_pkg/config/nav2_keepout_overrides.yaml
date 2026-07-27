@@ -1,0 +1,19 @@
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      filters: ["keepout_filter"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/keepout_costmap_filter_info"
+        transform_tolerance: 0.1
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      filters: ["keepout_filter"]
+      keepout_filter:
+        plugin: "nav2_costmap_2d::KeepoutFilter"
+        enabled: true
+        filter_info_topic: "/keepout_costmap_filter_info"
+        transform_tolerance: 0.1

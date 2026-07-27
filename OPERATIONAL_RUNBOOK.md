@@ -68,6 +68,39 @@ ros2 launch shbat_pkg navigation.launch.py \
   mode:=localization map_file:=/home/sahabat/sahabat_ws/maps/gallery_map
 ```
 
+### Keepout masks
+
+Keepout zones are stored separately from the occupancy map so AMCL continues
+matching lidar scans against the original mapped walls. For a flat map named
+`maps/gallery_map.yaml`, use:
+
+```text
+maps/gallery_map_keepout.yaml
+maps/gallery_map_keepout.pgm
+```
+
+For a directory map at `maps/gallery_map/map.yaml`, use
+`maps/gallery_map/keepout.yaml` and its referenced image. The mask YAML must
+have the same `resolution` and `origin` as the navigation map, with origin yaw
+equal to zero. Use a white mask for permitted space and solid black regions for
+keepout zones. Draw enough clearance for the complete robot footprint because
+costmap filters are not inflated by the normal inflation layer.
+
+Localization automatically enables the mask when the conventional path exists.
+An explicit path or intentional disable can be supplied with:
+
+```bash
+ros2 launch shbat_pkg navigation.launch.py \
+  mode:=localization \
+  map_file:=/home/sahabat/sahabat_ws/maps/gallery_map \
+  keepout_mask_file:=/home/sahabat/sahabat_ws/maps/custom_keepout.yaml
+
+ros2 launch shbat_pkg navigation.launch.py \
+  mode:=localization \
+  map_file:=/home/sahabat/sahabat_ws/maps/gallery_map \
+  use_keepout:=false
+```
+
 Gallery operation with the waypoint GUI and external API:
 
 ```bash
