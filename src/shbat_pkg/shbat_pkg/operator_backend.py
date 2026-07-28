@@ -1319,7 +1319,7 @@ class OperatorBackend(Node):
             return response
         if request.mode in ('localization', 'operations'):
             try:
-                yaml_path = self._map_directory(request.map_id) / 'map.yaml'
+                yaml_path = self._map_yaml_path(request.map_id)
             except ValueError as error:
                 response.message = str(error)
                 return response

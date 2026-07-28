@@ -95,7 +95,10 @@ class OperatorModeManager(Node):
             ]
         if mode in ('localization', 'operations'):
             map_stem = self.maps_directory / map_id
-            if not map_stem.with_suffix('.yaml').exists():
+            if not (
+                map_stem.with_suffix('.yaml').exists()
+                or (map_stem / 'map.yaml').exists()
+            ):
                 return None
             if mode == 'operations':
                 waypoint_file = self.maps_directory / f'{map_id}_waypoints.yaml'
