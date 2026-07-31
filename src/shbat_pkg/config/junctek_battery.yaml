@@ -1,0 +1,15 @@
+junctek_battery:
+  ros__parameters:
+    port: /dev/junctek
+    address: 1
+    baudrate: 115200
+    poll_rate_hz: 1.0
+    settings_refresh_s: 60.0
+    stale_timeout_s: 5.0
+    reconnect_delay_s: 2.0
+    invert_current_direction: false
+    low_percentage: 0.30
+    critical_percentage: 0.15
+    technology: unknown
+    location: main_battery
+    frame_id: ''

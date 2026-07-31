@@ -58,6 +58,7 @@ setup(
             'config/exhibit_routes.yaml',
             'config/collision_monitor_operator.yaml',
             'config/foxglove_operator.yaml',
+            'config/junctek_battery.yaml',
         ]),
         ('share/' + package_name + '/behavior_trees', [
             'behavior_trees/navigate_to_pose_replan_if_path_invalid.xml',
@@ -112,6 +113,8 @@ setup(
             'dock_pose_initializer = shbat_pkg.dock_pose_initializer:main',
             'live_waypoint_editor = shbat_pkg.live_waypoint_editor:main',
             'continue_mapping_session = shbat_pkg.continue_mapping_session:main',
+            'junctek_battery = shbat_pkg.junctek_battery:main',
+            'junctek_monitor = shbat_pkg.junctek_monitor:main',
         ],
     },
 )

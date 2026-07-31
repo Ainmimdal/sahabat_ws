@@ -1,6 +1,6 @@
 # Sahabat Robot - Project Status
 
-**Last Updated:** June 29, 2026
+**Last Updated:** August 1, 2026
 
 ## Current Implementation Notes (June 29, 2026)
 
@@ -26,6 +26,11 @@
   `localization_patrol_launch.py`, `navigation.launch.py`, and
   `operations.launch.py`. The one-click live waypoint editor passes it by
   default; use `ros2 run shbat_pkg live_waypoint_editor --no-zed` to disable it.
+- JUNCTEK KG-F battery support publishes `/battery_state`, `/diagnostics`, and
+  `/junctek/state`. The KG110F is connected through a QinHeng USB-RS485 adapter
+  and receives the stable `/dev/junctek` name from the workspace udev rules.
+  Protocol reads on the physical meter remain pending until those rules are
+  installed with administrator privileges.
 
 ## ✅ Current Working Setup
 
@@ -37,6 +42,7 @@
 | LIDAR | RPLIDAR S2 | FTDI (custom) | `/dev/ttyUSBx` (auto-probed) | 1,000,000 | ✅ Working (10 Hz, DenseBoost) |
 | IMU | HWT901B (WITMotion) | CH340/CP2102 | `/dev/ttyUSBx` (auto-probed) | 115200 | ✅ Working (USB power-dependent) |
 | Camera | ZED 2i | USB 3.0 | Direct | - | ✅ Working |
+| Battery Monitor | JUNCTEK KG110F (KG-F) | RS485/QinHeng USB | `/dev/junctek` → ttyACMx | 115200 | 🟡 Driver detected; live protocol check pending |
 
 **Important Notes:**
 - **RPLIDAR S2**: Mounted upside-down, 7cm forward of wheel axle. Connected via custom FTDI adapter (original USB cable broken). Needs **direct USB port** (not through hub) for adequate motor power. DenseBoost scan mode at 10 Hz / 32 KHz.
@@ -79,6 +85,7 @@
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
 | Waypoint Manager | `shbat_pkg/waypoint_manager` | ✅ Working (GUI) |
 | ZED Obstacle Detection | VoxelLayer + PointCloud2 | ✅ Launchable from operations and mapping paths with `use_zed:=true` |
+| Battery Monitor | `shbat_pkg/junctek_battery` | 🟡 Implemented; physical KG110F read pending |
 
 ---
 
@@ -299,7 +306,7 @@ ls /dev/input/js*
 - [ ] Add voice/audio feedback for tour guide functionality
 - [ ] Test full patrol workflow in production environment
 - [ ] Remote visualization solution for gallery deployment (Foxglove/VNC)
-- [ ] Battery monitoring integration
+- [ ] Complete physical KG110F read and battery-percentage verification
 - [ ] AprilTag docking for precise exhibit positioning (optional)
 
 ---

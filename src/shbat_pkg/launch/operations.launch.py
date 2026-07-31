@@ -11,8 +11,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -59,6 +61,10 @@ def generate_launch_description():
         ]),
         description='Legacy waypoint path; its directory owns waypoint sets',
     ))
+    arguments.extend([
+        DeclareLaunchArgument('use_battery_monitor', default_value='true'),
+        DeclareLaunchArgument('battery_port', default_value='/dev/junctek'),
+    ])
 
     operations = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -74,4 +80,20 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription(arguments + [operations])
+    battery_monitor = Node(
+        package='shbat_pkg',
+        executable='junctek_battery',
+        name='junctek_battery',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'", LaunchConfiguration('use_battery_monitor'),
+            "' == 'true' and '", LaunchConfiguration('use_hardware'),
+            "' == 'true'",
+        ])),
+        parameters=[
+            os.path.join(pkg_share, 'config', 'junctek_battery.yaml'),
+            {'port': LaunchConfiguration('battery_port')},
+        ],
+    )
+
+    return LaunchDescription(arguments + [operations, battery_monitor])

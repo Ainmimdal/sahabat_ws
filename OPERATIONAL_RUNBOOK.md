@@ -310,6 +310,60 @@ larger initial heading errors may cause an in-place pivot. Stop and
 retune if navigation repeatedly alternates between pivoting, creeping forward,
 and braking.
 
+## JUNCTEK KG-F battery monitor
+
+The KG110F uses the kernel's existing `cdc_acm` USB serial driver. Install the
+workspace rule once to grant access and create a stable `/dev/junctek` link for
+this meter's USB-RS485 adapter:
+
+```bash
+sudo cp /home/sahabat/sahabat_ws/udev/99-sahabat-robot.rules \
+  /etc/udev/rules.d/99-sahabat-robot.rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+ls -l /dev/junctek
+```
+
+If the link does not appear, unplug and reconnect only the KG-F USB adapter,
+then repeat `ls -l /dev/junctek`. The rule is tied to adapter serial
+`5C83118549`, so it does not rename the motor RS485 adapter.
+
+The canonical hardware launches start the read-only battery node by default.
+It publishes standard ROS battery data plus detailed meter state:
+
+```bash
+ros2 topic echo /battery_state --once
+ros2 topic echo /junctek/state --once
+ros2 topic echo /diagnostics --once
+```
+
+For a battery-only check that does not start motors, sensors, or Nav2:
+
+```bash
+source /home/sahabat/sahabat_ws/install/setup.bash
+ros2 run shbat_pkg junctek_battery --ros-args \
+  --params-file /home/sahabat/sahabat_ws/src/shbat_pkg/config/junctek_battery.yaml
+```
+
+Set `use_battery_monitor:=false` on `bringup.launch.py`,
+`navigation.launch.py`, or `operations.launch.py` when intentionally running
+without the meter.
+
+The desktop **Sahabat JUNCTEK Battery Monitor** provides live voltage, signed
+current, power, temperature, remaining Ah, battery percentage, history graphs,
+all documented settings, and guarded maintenance actions. Stop the ROS battery
+node or robot launch before opening it because the GUI directly owns the
+serial port:
+
+```bash
+ros2 run shbat_pkg junctek_monitor
+```
+
+Reading is automatic. Every setting write requires an explicit confirmation;
+factory reset additionally requires typing `RESET`. Confirm protection limits,
+capacity, shunt/current ratio, relay type, and calibration against the physical
+battery system before changing them.
+
 ## LIDAR-only diagnostics
 
 Stop other robot launches first so only one process opens the serial port. Find

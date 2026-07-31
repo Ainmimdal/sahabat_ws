@@ -33,6 +33,8 @@ def generate_launch_description():
     smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
     operator_safety = LaunchConfiguration('operator_safety')
     use_hardware = LaunchConfiguration('use_hardware')
+    use_battery_monitor = LaunchConfiguration('use_battery_monitor')
+    battery_port = LaunchConfiguration('battery_port')
     use_command_arbiter = LaunchConfiguration('use_command_arbiter')
     initial_pose_x = LaunchConfiguration('initial_pose_x')
     initial_pose_y = LaunchConfiguration('initial_pose_y')
@@ -70,6 +72,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('operator_safety', default_value='false'),
         DeclareLaunchArgument('use_hardware', default_value='true'),
+        DeclareLaunchArgument('use_battery_monitor', default_value='true'),
+        DeclareLaunchArgument('battery_port', default_value='/dev/junctek'),
         DeclareLaunchArgument('initial_pose_x', default_value='0.0'),
         DeclareLaunchArgument('initial_pose_y', default_value='0.0'),
         DeclareLaunchArgument('initial_pose_yaw', default_value='0.0'),
@@ -125,6 +129,26 @@ def generate_launch_description():
         ])),
     )
 
+    battery_monitor = Node(
+        package='shbat_pkg',
+        executable='junctek_battery',
+        name='junctek_battery',
+        output='screen',
+        condition=IfCondition(PythonExpression([
+            "'", use_battery_monitor, "' == 'true' and '",
+            use_hardware, "' == 'true'",
+        ])),
+        parameters=[
+            os.path.join(pkg_share, 'config', 'junctek_battery.yaml'),
+            {'port': battery_port},
+        ],
+    )
+
     return LaunchDescription(
-        arguments + [odom_only, slam_navigation, command_arbiter]
+        arguments + [
+            odom_only,
+            slam_navigation,
+            command_arbiter,
+            battery_monitor,
+        ]
     )

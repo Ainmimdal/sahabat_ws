@@ -10,8 +10,10 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -24,6 +26,8 @@ def generate_launch_description():
         DeclareLaunchArgument('joy_cmd_topic', default_value='cmd_vel'),
         DeclareLaunchArgument('lidar_scan_topic', default_value='scan'),
         DeclareLaunchArgument('use_scan_filter', default_value='false'),
+        DeclareLaunchArgument('use_battery_monitor', default_value='true'),
+        DeclareLaunchArgument('battery_port', default_value='/dev/junctek'),
     ]
 
     legacy_bringup = IncludeLaunchDescription(
@@ -40,4 +44,16 @@ def generate_launch_description():
         }.items(),
     )
 
-    return LaunchDescription(arguments + [legacy_bringup])
+    battery_monitor = Node(
+        package='shbat_pkg',
+        executable='junctek_battery',
+        name='junctek_battery',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('use_battery_monitor')),
+        parameters=[
+            os.path.join(pkg_share, 'config', 'junctek_battery.yaml'),
+            {'port': LaunchConfiguration('battery_port')},
+        ],
+    )
+
+    return LaunchDescription(arguments + [legacy_bringup, battery_monitor])

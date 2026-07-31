@@ -65,6 +65,8 @@
 <depend>geometry_msgs</depend>
 <depend>std_msgs</depend>
 <depend>sensor_msgs</depend>
+<depend>diagnostic_msgs</depend>
+<depend>rcl_interfaces</depend>
 <depend>visualization_msgs</depend>
 <depend>std_srvs</depend>
 <depend>action_msgs</depend>

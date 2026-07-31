@@ -2,7 +2,8 @@
 # Install: sudo cp 99-sahabat-robot.rules /etc/udev/rules.d/
 # Reload: sudo udevadm control --reload-rules && sudo udevadm trigger
 #
-# All three devices use FTDI (0403:6001) adapters.
+# Existing motor and LIDAR devices use FTDI (0403:6001) adapters.
+# The KG-F monitor uses a QinHeng USB serial adapter handled by cdc_acm.
 # Motor differentiated by serial A50285BI.
 # LIDAR (RPLIDAR S2) and IMU (BNO055) share serial A5069RR4,
 # differentiated by parent hub:
@@ -11,6 +12,9 @@
 
 # Motor Controller (ZLAC8015D via FTDI RS485)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="A50285BI", SYMLINK+="motor", MODE="0666"
+
+# JUNCTEK KG-F battery monitor (KG110F via QinHeng USB-RS485)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="55d3", ATTRS{serial}=="5C83118549", SYMLINK+="junctek", MODE="0666"
 
 # LIDAR (RPLIDAR S2 via FTDI) — behind Huasheng USB2.0 HUB (214b:7250)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", ATTRS{serial}=="A5069RR4", ATTRS{idVendor}=="214b", ATTRS{idProduct}=="7250", SYMLINK+="lidar", MODE="0666"

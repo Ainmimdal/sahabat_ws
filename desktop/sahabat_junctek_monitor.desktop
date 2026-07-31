@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Sahabat JUNCTEK Battery Monitor
+Comment=Monitor and configure the JUNCTEK KG-F battery meter
+Exec=/home/sahabat/sahabat_ws/scripts/start_junctek_monitor.sh
+Icon=utilities-system-monitor
+Terminal=false
+Categories=Utility;System;
