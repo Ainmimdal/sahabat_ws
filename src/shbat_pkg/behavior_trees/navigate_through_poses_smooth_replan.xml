@@ -1,0 +1,74 @@
+<!--
+  Follow operator-approved route points as one continuous path. Replan through
+  the remaining poses when the path changes, becomes invalid, or reaches five
+  seconds old, then smooth the new collision-checked path once.
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      <PipelineSequence name="NavigateWithPreferredRoute">
+        <RateController hz="1.0" name="RateControllerComputeRoute">
+          <RecoveryNode number_of_retries="1" name="RecoveryComputeRoute">
+            <ReactiveSequence name="UpdateAndComputeRoute">
+              <RemovePassedGoals
+                input_goals="{goals}"
+                output_goals="{goals}"
+                radius="0.4"/>
+              <Fallback name="FallbackComputeRoute">
+                <ReactiveSequence name="CheckIfNewRouteNeeded">
+                  <Inverter>
+                    <PathExpiringTimer seconds="5" path="{path}"/>
+                  </Inverter>
+                  <Inverter>
+                    <GlobalUpdatedGoal/>
+                  </Inverter>
+                  <IsPathValid path="{path}"/>
+                </ReactiveSequence>
+                <Sequence name="ComputeAndSmoothRoute">
+                  <ComputePathThroughPoses
+                    goals="{goals}"
+                    path="{raw_path}"
+                    planner_id="GridBased"/>
+                  <SmoothPath
+                    unsmoothed_path="{raw_path}"
+                    smoothed_path="{path}"
+                    smoother_id="simple_smoother"
+                    max_smoothing_duration="0.5"
+                    check_for_collisions="true"/>
+                </Sequence>
+              </Fallback>
+            </ReactiveSequence>
+            <ClearEntireCostmap
+              name="ClearGlobalCostmap-Context"
+              service_name="global_costmap/clear_entirely_global_costmap"/>
+          </RecoveryNode>
+        </RateController>
+        <RecoveryNode number_of_retries="1" name="RecoveryFollowRoute">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          <ClearEntireCostmap
+            name="ClearLocalCostmap-Context"
+            service_name="local_costmap/clear_entirely_local_costmap"/>
+        </RecoveryNode>
+      </PipelineSequence>
+      <ReactiveFallback name="FallbackRecoveries">
+        <GoalUpdated/>
+        <RoundRobin name="RecoveryActions">
+          <Sequence name="ClearingActions">
+            <ClearEntireCostmap
+              name="ClearLocalCostmap-Subtree"
+              service_name="local_costmap/clear_entirely_local_costmap"/>
+            <ClearEntireCostmap
+              name="ClearGlobalCostmap-Subtree"
+              service_name="global_costmap/clear_entirely_global_costmap"/>
+          </Sequence>
+          <Spin name="SpinRecovery" spin_dist="1.57"/>
+          <Wait name="WaitRecovery" wait_duration="5"/>
+          <BackUp
+            name="BackUpRecovery"
+            backup_dist="0.30"
+            backup_speed="0.05"/>
+        </RoundRobin>
+      </ReactiveFallback>
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

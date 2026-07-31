@@ -1,0 +1,23 @@
+uint8 CREATE=1
+uint8 DELETE=2
+uint8 SELECT=3
+uint8 ARM_ADD_POINT=4
+uint8 CANCEL_ADD_POINT=5
+uint8 SET_BIDIRECTIONAL=6
+uint8 ATTACH_EXISTING_POINTS=7
+uint8 REMOVE_POINT_FROM_ROUTE=8
+uint8 MOVE_POINT_EARLIER=9
+uint8 MOVE_POINT_LATER=10
+uint8 DELETE_POINTS_EVERYWHERE=11
+
+uint8 action
+string segment_id
+string from_waypoint_id
+string to_waypoint_id
+bool bidirectional
+string route_point_id
+string[] route_point_ids
+---
+bool success
+string active_segment_id
+string message

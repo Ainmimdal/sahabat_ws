@@ -28,7 +28,7 @@ class CommandArbiter(Node):
     def __init__(self) -> None:
         """Create source subscriptions and a fixed-rate safe output."""
         super().__init__('command_arbiter')
-        self.declare_parameter('publish_rate', 20.0)
+        self.declare_parameter('publish_rate', 30.0)
         self.declare_parameter('joystick_timeout', 0.30)
         self.declare_parameter('remote_timeout', 0.25)
         self.declare_parameter('navigation_timeout', 0.50)

@@ -125,6 +125,7 @@ def main(argv=None):
         f'map_id:={map_id}',
         'use_rviz:=false',
         'use_waypoint_gui:=false',
+        'use_api:=true',
         f'use_zed:={str(args.use_zed).lower()}',
         f'localization_backend:={args.localization_backend}',
     ]
@@ -155,7 +156,9 @@ def main(argv=None):
     signal.signal(signal.SIGTERM, handle_signal)
 
     try:
-        processes.append(subprocess.Popen(operations_cmd))
+        operations_env = os.environ.copy()
+        operations_env['API_HOST'] = '127.0.0.1'
+        processes.append(subprocess.Popen(operations_cmd, env=operations_env))
         time.sleep(2.0)
         processes.append(subprocess.Popen(backend_cmd))
         time.sleep(max(0.0, args.startup_delay))

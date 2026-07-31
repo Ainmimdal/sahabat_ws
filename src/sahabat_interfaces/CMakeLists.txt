@@ -15,6 +15,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Waypoint.msg"
   "msg/WaypointSetInfo.msg"
   "srv/ControlLease.srv"
+  "srv/EditRoute.srv"
   "srv/GetWaypoints.srv"
   "srv/GetWaypointGraph.srv"
   "srv/ListMaps.srv"

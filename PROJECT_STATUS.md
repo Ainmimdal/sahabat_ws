@@ -13,7 +13,9 @@
   the live waypoint-editor launcher.
 - The RViz waypoint editor is vendored as `src/waypoint_editor` and launched by
   `waypoint_editor.launch.py`. It supports offline YAML editing and live
-  operator-backend editing.
+  operator-backend editing. Its **Preferred Routes** section edits route
+  segments and draggable cyan route points in both modes; **Save WPs + Routes**
+  persists the complete graph.
 - Desktop launchers currently include:
   - `Sahabat Waypoint Editor Offline`: offline map/waypoint-set editing.
   - `Sahabat Waypoint Editor Live`: starts live operations plus the RViz
@@ -334,7 +336,10 @@ ls /dev/input/js*
 
 | Topic | Type | Publisher | Description |
 |-------|------|-----------|-------------|
-| `/cmd_vel` | Twist | Nav2/Joystick | Velocity commands |
+| `/cmd_vel` | Twist | command_arbiter | Selected velocity command to the base |
+| `/cmd_vel_nav_smoothed` | Twist | velocity_smoother | Smoothed Nav2 candidate |
+| `/cmd_vel_joy` | Twist | joy2cmd | Local joystick candidate |
+| `/cmd_vel_recovery` | Twist | localization_recovery | Recovery candidate |
 | `/odom` | Odometry | EKF | Filtered odometry |
 | `/wheel_odom` | Odometry | base_controller | Raw wheel odometry |
 | `/imu` | Imu | witmotion_node | IMU data (remapped from /witmotion/imu) |

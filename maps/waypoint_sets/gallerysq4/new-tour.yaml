@@ -1,0 +1,329 @@
+name: New Tour
+revision: 6
+waypoints:
+  - id: 0
+    name: waypoint_3
+    x: -4.7249999999999996
+    y: 8.7319999999999993
+    yaw: 1.143
+    dwell_seconds: 0
+    enabled: true
+  - id: 1
+    name: waypoint_1
+    x: -1.2390000000000001
+    y: 0.94299999999999995
+    yaw: 1.085
+    dwell_seconds: 0
+    enabled: true
+  - id: 2
+    name: waypoint_2
+    x: 2.5899999999999999
+    y: 6.3029999999999999
+    yaw: 1.117
+    dwell_seconds: 0
+    enabled: true
+  - id: 3
+    name: waypoint_4
+    x: 6.6681342124938965
+    y: 12.900291442871094
+    yaw: -0.35800002018233379
+    dwell_seconds: 0
+    enabled: true
+  - id: wp-1
+    name: waypoint_5
+    x: 13.113968849182129
+    y: 26.800075531005859
+    yaw: -0.44379506595795559
+    dwell_seconds: 0
+    enabled: true
+  - id: wp-2
+    name: waypoint_6
+    x: 16.727119445800781
+    y: 22.8841552734375
+    yaw: -1.9833783015710598
+    dwell_seconds: 0
+    enabled: true
+segments:
+  - id: waypoint_1-to-waypoint_2
+    name: waypoint_1 to waypoint_2
+    from_waypoint_id: 1
+    to_waypoint_id: 2
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-001
+        name: rp-001
+        x: -0.5
+        y: 3.25
+        yaw: 1.236059
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-002
+        name: rp-002
+        x: 0.3
+        y: 5.55
+        yaw: 0.317684
+        dwell_seconds: 0
+        enabled: true
+  - id: waypoint_2-to-waypoint_3
+    name: waypoint_2 to waypoint_3
+    from_waypoint_id: 2
+    to_waypoint_id: 0
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-003
+        name: rp-003
+        x: 0.1
+        y: 5.55
+        yaw: 2.848004
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-004
+        name: rp-004
+        x: -2.05
+        y: 6.2
+        yaw: 2.146221
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-005
+        name: rp-005
+        x: -3.25
+        y: 8.05
+        yaw: 2.708497
+        dwell_seconds: 0
+        enabled: true
+  - id: waypoint_3-to-waypoint_4
+    name: waypoint_3 to waypoint_4
+    from_waypoint_id: 0
+    to_waypoint_id: 3
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-006
+        name: rp-006
+        x: -2.25
+        y: 8.05
+        yaw: 0.870903
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-007
+        name: rp-007
+        x: -0.65
+        y: 9.95
+        yaw: 1.156289
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-008
+        name: rp-008
+        x: 0.45
+        y: 12.45
+        yaw: 0.66273
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-009
+        name: rp-009
+        x: 2.5
+        y: 14.05
+        yaw: -0.099669
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-010
+        name: rp-010
+        x: 5.0
+        y: 13.8
+        yaw: -0.49463
+        dwell_seconds: 0
+        enabled: true
+  - id: waypoint_4-to-waypoint_5
+    name: waypoint_4 to waypoint_5
+    from_waypoint_id: 3
+    to_waypoint_id: wp-1
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-011
+        name: rp-011
+        x: 8.7
+        y: 13.05
+        yaw: 1.045213
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-012
+        name: rp-012
+        x: 10.15
+        y: 15.55
+        yaw: 1.139658
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-013
+        name: rp-013
+        x: 11.3
+        y: 18.05
+        yaw: 2.015216
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-014
+        name: rp-014
+        x: 10.8
+        y: 19.1
+        yaw: 2.379446
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-015
+        name: rp-015
+        x: 8.6
+        y: 21.2
+        yaw: 2.025897
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-016
+        name: rp-016
+        x: 7.45
+        y: 23.55
+        yaw: 2.064738
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-017
+        name: rp-017
+        x: 6.75
+        y: 24.85
+        yaw: 1.4317
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-018
+        name: rp-018
+        x: 7.1
+        y: 27.35
+        yaw: 0.431139
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-019
+        name: rp-019
+        x: 9.6
+        y: 28.5
+        yaw: -0.309703
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-020
+        name: rp-020
+        x: 12.1
+        y: 27.7
+        yaw: -0.725881
+        dwell_seconds: 0
+        enabled: true
+  - id: waypoint_5-to-waypoint_6
+    name: waypoint_5 to waypoint_6
+    from_waypoint_id: wp-1
+    to_waypoint_id: wp-2
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-021
+        name: rp-021
+        x: 15.6
+        y: 26.3
+        yaw: -0.971621
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-022
+        name: rp-022
+        x: 17.0
+        y: 24.25
+        yaw: -1.767989
+        dwell_seconds: 0
+        enabled: true
+  - id: waypoint_6-to-waypoint_1
+    name: waypoint_6 to waypoint_1
+    from_waypoint_id: wp-2
+    to_waypoint_id: 1
+    bidirectional: false
+    enabled: true
+    via_points:
+      - id: rp-023
+        name: rp-023
+        x: 15.4
+        y: 20.4
+        yaw: -1.880499
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-024
+        name: rp-024
+        x: 14.6
+        y: 17.9
+        yaw: -1.825164
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-025
+        name: rp-025
+        x: 13.95
+        y: 15.4
+        yaw: -1.951303
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-026
+        name: rp-026
+        x: 12.95
+        y: 12.9
+        yaw: -2.14011
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-027
+        name: rp-027
+        x: 11.35
+        y: 10.4
+        yaw: -2.018316
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-028
+        name: rp-028
+        x: 10.15
+        y: 7.9
+        yaw: -1.709892
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-029
+        name: rp-029
+        x: 9.8
+        y: 5.4
+        yaw: -2.303611
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-030
+        name: rp-030
+        x: 7.55
+        y: 2.9
+        yaw: -2.034444
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-031
+        name: rp-031
+        x: 6.3
+        y: 0.4
+        yaw: -2.279423
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-032
+        name: rp-032
+        x: 5.1
+        y: -1.0
+        yaw: 3.061763
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-033
+        name: rp-033
+        x: 2.6
+        y: -0.8
+        yaw: 2.710454
+        dwell_seconds: 0
+        enabled: true
+      - id: rp-034
+        name: rp-034
+        x: 0.1
+        y: 0.35
+        yaw: 2.724686
+        dwell_seconds: 0
+        enabled: true
+settings:
+  direct_fallback: reject
+  route_origin_tolerance: 1.25

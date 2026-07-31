@@ -123,17 +123,23 @@ def generate_launch_description():
     use_waypoint_gui = LaunchConfiguration('use_waypoint_gui')
 
     joy_cmd_topic_arg = DeclareLaunchArgument(
-        'joy_cmd_topic', default_value='cmd_vel'
+        'joy_cmd_topic', default_value='cmd_vel_joy'
     )
     joy_cmd_topic = LaunchConfiguration('joy_cmd_topic')
     smoothed_cmd_topic_arg = DeclareLaunchArgument(
-        'smoothed_cmd_topic', default_value='cmd_vel'
+        'smoothed_cmd_topic', default_value='cmd_vel_nav_smoothed'
     )
     smoothed_cmd_topic = LaunchConfiguration('smoothed_cmd_topic')
     recovery_cmd_topic_arg = DeclareLaunchArgument(
-        'recovery_cmd_topic', default_value='cmd_vel'
+        'recovery_cmd_topic', default_value='cmd_vel_recovery'
     )
     recovery_cmd_topic = LaunchConfiguration('recovery_cmd_topic')
+    use_command_arbiter_arg = DeclareLaunchArgument(
+        'use_command_arbiter',
+        default_value='true',
+        description='Give /cmd_vel one priority-selecting publisher',
+    )
+    use_command_arbiter = LaunchConfiguration('use_command_arbiter')
     operator_safety_arg = DeclareLaunchArgument(
         'operator_safety', default_value='false'
     )
@@ -261,6 +267,14 @@ def generate_launch_description():
             ])),
         )
 
+    command_arbiter = Node(
+        package='shbat_pkg',
+        executable='command_arbiter',
+        name='command_arbiter',
+        output='screen',
+        condition=IfCondition(use_command_arbiter),
+    )
+
     dock_pose_initializer = Node(
         package='shbat_pkg',
         executable='dock_pose_initializer',
@@ -292,6 +306,7 @@ def generate_launch_description():
         joy_cmd_topic_arg,
         smoothed_cmd_topic_arg,
         recovery_cmd_topic_arg,
+        use_command_arbiter_arg,
         operator_safety_arg,
         use_hardware_arg,
         use_saved_initial_pose_arg,
@@ -311,5 +326,6 @@ def generate_launch_description():
         api_bridge,
         exhibit_navigator,
         localization_recovery,
+        command_arbiter,
         dock_pose_initializer,
     ])

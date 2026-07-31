@@ -935,6 +935,11 @@ def generate_launch_description():
         'behavior_trees',
         'navigate_to_pose_replan_if_path_invalid.xml',
     )
+    nav_through_poses_bt = os.path.join(
+        pkg_share,
+        'behavior_trees',
+        'navigate_through_poses_smooth_replan.xml',
+    )
 
     nav2_lifecycle_nodes = [
         'controller_server',
@@ -976,7 +981,8 @@ def generate_launch_description():
         executable='behavior_server',
         name='behavior_server',
         output='screen',
-        parameters=nav2_parameters
+        parameters=nav2_parameters,
+        remappings=[('cmd_vel', 'cmd_vel_nav')],
     )
 
     nav2_bt_navigator = Node(
@@ -986,7 +992,10 @@ def generate_launch_description():
         output='screen',
         parameters=[
             *nav2_parameters,
-            {'default_nav_to_pose_bt_xml': nav_to_pose_bt},
+            {
+                'default_nav_to_pose_bt_xml': nav_to_pose_bt,
+                'default_nav_through_poses_bt_xml': nav_through_poses_bt,
+            },
         ]
     )
 

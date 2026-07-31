@@ -86,12 +86,12 @@ controller_server:
     general_goal_checker:
       stateful: True               # Once in tolerance, stay "reached" even if drifts slightly
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.05      # Finish within 5 cm before accepting the goal
-      yaw_goal_tolerance: 0.05     # Finish within ~3 degrees of the requested yaw
+      xy_goal_tolerance: 0.10      # Avoid low-speed corrections inside localization noise
+      yaw_goal_tolerance: 0.12     # ~7 degrees is adequate for gallery stops
 
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.3      # Proven indoor cruise speed
+      desired_linear_vel: 0.42     # Slightly below the 0.5 m/s joystick maximum
       max_linear_vel: 0.5          # Conservative physical command cap
       min_linear_vel: 0.05
       min_approach_linear_velocity: 0.08  # Avoid crawling below reliable motor motion
@@ -109,7 +109,7 @@ controller_server:
       max_angular_accel: 3.0
       # Drive small errors as arcs, but pivot before an indoor turn becomes too
       # tight for the 0.5 rad/s angular limit.
-      rotate_to_heading_min_angle: 0.3  # ~17 degrees
+      rotate_to_heading_min_angle: 0.6  # Arc through small errors; pivot only for real turns
       transform_tolerance: 0.5
       use_velocity_scaled_lookahead_dist: true
       allow_reversing: false
@@ -253,10 +253,14 @@ planner_server:
     transform_tolerance: 0.5
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: true
+      plugin: "nav2_smac_planner/SmacPlanner2D"
+      tolerance: 0.25
+      downsample_costmap: false
+      downsampling_factor: 1
       allow_unknown: true          # Allow planning through unknown space
+      max_iterations: 1000000
+      max_on_approach_iterations: 1000
+      smooth_path: false           # Behavior tree calls smoother_server once
 
 smoother_server:
   ros__parameters:

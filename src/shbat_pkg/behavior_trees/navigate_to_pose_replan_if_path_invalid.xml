@@ -1,10 +1,9 @@
 <!--
   NavigateToPose tree for Sahabat operations.
 
-  Nav2's default tree recomputes the global path at 1 Hz. With the ZED
-  pointcloud feeding the costmaps, that can cause unnecessary path churn while
-  the original path is still valid. This tree keeps the recovery behavior but
-  only recomputes when the goal changes or the current path becomes invalid.
+  Recompute when the goal changes, the path becomes invalid, or the current
+  path is five seconds old. Smooth each newly planned path once before handing
+  it to the controller.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -15,11 +14,22 @@
             <Fallback name="FallbackComputePathToPose">
               <ReactiveSequence name="CheckIfNewPathNeeded">
                 <Inverter>
+                  <PathExpiringTimer seconds="5" path="{path}"/>
+                </Inverter>
+                <Inverter>
                   <GlobalUpdatedGoal/>
                 </Inverter>
                 <IsPathValid path="{path}"/>
               </ReactiveSequence>
-              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+              <Sequence name="ComputeAndSmoothPath">
+                <ComputePathToPose goal="{goal}" path="{raw_path}" planner_id="GridBased"/>
+                <SmoothPath
+                  unsmoothed_path="{raw_path}"
+                  smoothed_path="{path}"
+                  smoother_id="simple_smoother"
+                  max_smoothing_duration="0.5"
+                  check_for_collisions="true"/>
+              </Sequence>
             </Fallback>
             <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
           </RecoveryNode>

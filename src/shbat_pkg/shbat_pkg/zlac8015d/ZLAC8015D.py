@@ -289,6 +289,11 @@ class Controller:
         R_ms = max(0, min(32767, int(R_ms)))
         return self.client.write_registers(address=self.L_ACL_TIME, values=[L_ms, R_ms], device_id=self.ID)
 
+    def get_accel_time(self):
+        """Read the configured left and right acceleration times in ms."""
+        registers = self.modbus_fail_read_handler(self.L_ACL_TIME, 2)
+        return registers[0], registers[1]
+
     def set_decel_time(self, L_ms, R_ms):
         """
         Set deceleration time for both motors.
@@ -300,6 +305,11 @@ class Controller:
         L_ms = max(0, min(32767, int(L_ms)))
         R_ms = max(0, min(32767, int(R_ms)))
         return self.client.write_registers(address=self.L_DCL_TIME, values=[L_ms, R_ms], device_id=self.ID)
+
+    def get_decel_time(self):
+        """Read the configured left and right deceleration times in ms."""
+        registers = self.modbus_fail_read_handler(self.L_DCL_TIME, 2)
+        return registers[0], registers[1]
 
     # ==================== VELOCITY CONTROL ====================
     

@@ -90,6 +90,7 @@ class OperatorModeManager(Node):
                 'mode:=mapping', 'use_rviz:=false', 'use_foxglove:=false',
                 'use_mapping_panel:=false', 'joy_cmd_topic:=cmd_vel_joy',
                 'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
+                'use_command_arbiter:=false',
                 'operator_safety:=true',
                 'use_hardware:=false',
             ]
@@ -115,6 +116,7 @@ class OperatorModeManager(Node):
                     'joy_cmd_topic:=cmd_vel_joy',
                     'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
                     'recovery_cmd_topic:=cmd_vel_recovery',
+                    'use_command_arbiter:=false',
                     'operator_safety:=true',
                     'use_hardware:=false',
                     f'waypoint_file:={waypoint_file}',
@@ -125,6 +127,7 @@ class OperatorModeManager(Node):
                 'use_rviz:=false', 'use_foxglove:=false',
                 'joy_cmd_topic:=cmd_vel_joy',
                 'smoothed_cmd_topic:=cmd_vel_nav_smoothed',
+                'use_command_arbiter:=false',
                 'operator_safety:=true',
                 'use_hardware:=false',
             ]

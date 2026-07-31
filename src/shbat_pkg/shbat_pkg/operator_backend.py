@@ -11,8 +11,10 @@ import time
 import uuid
 
 import rclpy
-from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Twist
-from nav2_msgs.action import FollowWaypoints, NavigateToPose
+from geometry_msgs.msg import Point, PoseStamped
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
+from nav2_msgs.action import FollowWaypoints, NavigateThroughPoses
+from nav2_msgs.action import NavigateToPose
 from nav2_msgs.srv import LoadMap as Nav2LoadMap
 from nav_msgs.msg import Odometry
 from nav_msgs.msg import OccupancyGrid
@@ -41,6 +43,7 @@ from tf2_ros import Buffer, TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
 import yaml
 
+from .route_graph import RouteNotFound, nearest_waypoint_id, plan_route
 from .waypoint_store import WaypointStore
 
 
@@ -269,6 +272,12 @@ class OperatorBackend(Node):
             self,
             NavigateToPose,
             '/navigate_to_pose',
+            callback_group=self.group,
+        )
+        self.route_client = ActionClient(
+            self,
+            NavigateThroughPoses,
+            '/navigate_through_poses',
             callback_group=self.group,
         )
         self.patrol_client = ActionClient(
@@ -557,7 +566,10 @@ class OperatorBackend(Node):
     def _status_pose(self):
         """Return the robot pose in map when localization provides that TF."""
         odom_pose = ('odom', self.pose_x, self.pose_y, self.pose_yaw)
-        if self.mode == OperatorStatus.MODE_IDLE:
+        if (
+            self.mode == OperatorStatus.MODE_IDLE
+            and not self.active_map
+        ):
             return odom_pose
         try:
             transform = self.tf_buffer.lookup_transform(
@@ -1165,7 +1177,12 @@ class OperatorBackend(Node):
         markers.markers.append(clear)
         if self.active_map:
             try:
-                _revision, waypoints = self._read_waypoints(self.active_map)
+                _revision, items, segments, _settings = self._waypoint_store(
+                    self.active_map
+                ).read_graph()
+                waypoints = [
+                    self._waypoint_message(item) for item in items
+                ]
                 for index, waypoint in enumerate(waypoints):
                     marker = Marker()
                     marker.header.frame_id = 'map'
@@ -1186,9 +1203,125 @@ class OperatorBackend(Node):
                     marker.color.b = 0.77
                     marker.color.a = 1.0 if waypoint.enabled else 0.3
                     markers.markers.append(marker)
+                waypoint_lookup = {
+                    str(item.get('id', '')): item for item in items
+                }
+                for index, segment in enumerate(segments):
+                    source = waypoint_lookup.get(
+                        str(segment.get('from_waypoint_id', ''))
+                    )
+                    target = waypoint_lookup.get(
+                        str(segment.get('to_waypoint_id', ''))
+                    )
+                    if source is None or target is None:
+                        continue
+                    marker = Marker()
+                    marker.header.frame_id = 'map'
+                    marker.header.stamp = self.get_clock().now().to_msg()
+                    marker.ns = 'sahabat_routes'
+                    marker.id = 1000 + index
+                    marker.type = Marker.LINE_STRIP
+                    marker.action = Marker.ADD
+                    marker.scale.x = 0.07
+                    marker.color.r = 0.20
+                    marker.color.g = 0.85
+                    marker.color.b = 1.0
+                    marker.color.a = (
+                        0.9 if bool(segment.get('enabled', True)) else 0.2
+                    )
+                    route_points = [
+                        source,
+                        *segment.get('via_points', []),
+                        target,
+                    ]
+                    marker.points = [
+                        Point(
+                            x=float(item.get('x', 0.0)),
+                            y=float(item.get('y', 0.0)),
+                            z=0.04,
+                        )
+                        for item in route_points
+                    ]
+                    markers.markers.append(marker)
             except (OSError, ValueError, yaml.YAMLError):
                 pass
         self.waypoint_marker_pub.publish(markers)
+
+    def _route_points(
+        self,
+        waypoints,
+        segments,
+        settings,
+        target_id: str,
+    ):
+        """Resolve a human-approved route from the closest current waypoint."""
+        target = next(
+            (item for item in waypoints if str(item.get('id')) == target_id),
+            None,
+        )
+        if target is None or not bool(target.get('enabled', True)):
+            raise RouteNotFound('Waypoint not found')
+        if not segments:
+            return [dict(target)], 'direct route (no route graph configured)'
+
+        frame, x, y, _yaw = self._status_pose()
+        tolerance = max(
+            0.1,
+            min(5.0, float(settings.get('route_origin_tolerance', 1.25))),
+        )
+        source_id = (
+            nearest_waypoint_id(waypoints, x, y, tolerance)
+            if frame == 'map'
+            else None
+        )
+        if source_id is not None:
+            try:
+                points = plan_route(
+                    waypoints,
+                    segments,
+                    source_id,
+                    target_id,
+                )
+                return points, f'preferred route {source_id} -> {target_id}'
+            except RouteNotFound as error:
+                route_error = str(error)
+        else:
+            route_error = (
+                f'robot is not within {tolerance:.2f} m of a route waypoint'
+                if frame == 'map'
+                else 'robot map pose is unavailable'
+            )
+
+        fallback = str(
+            settings.get('direct_fallback', 'warn')
+        ).strip().lower()
+        if fallback == 'reject':
+            raise RouteNotFound(
+                f'Preferred route unavailable: {route_error}'
+            )
+        if fallback == 'warn':
+            self.get_logger().warning(
+                f'{route_error}; using direct Nav2 planning to {target_id}'
+            )
+        return [dict(target)], f'direct fallback ({route_error})'
+
+    def _route_poses(self, points):
+        """Convert route points to poses, orienting intermediate poses forward."""
+        poses = []
+        for index, point in enumerate(points):
+            waypoint = dict(point)
+            if index + 1 < len(points):
+                following = points[index + 1]
+                waypoint['yaw'] = math.atan2(
+                    float(following.get('y', 0.0))
+                    - float(point.get('y', 0.0)),
+                    float(following.get('x', 0.0))
+                    - float(point.get('x', 0.0)),
+                )
+            poses.append(self._pose_from_waypoint(
+                self._waypoint_message(waypoint)
+            ))
+        return poses
 
     def _patrol_service(self, request, response):
         if not self._lease_valid(request.lease_id):
@@ -1218,6 +1351,9 @@ class OperatorBackend(Node):
             return response
         try:
             store = self._waypoint_store(self.active_map)
+            route_items = []
+            route_segments = []
+            route_settings = {}
             if (
                 request.command == PatrolCommand.Request.NAVIGATE
                 and request.waypoint_id == MAP_DOCK_WAYPOINT_ID
@@ -1236,27 +1372,70 @@ class OperatorBackend(Node):
                 waypoints = [dock]
             else:
                 set_id = request.set_id or store.active_set_id()
-                _revision, waypoints = self._read_waypoints(
-                    self.active_map, set_id
-                )
-        except (OSError, ValueError, yaml.YAMLError) as error:
+                (
+                    _revision,
+                    route_items,
+                    route_segments,
+                    route_settings,
+                ) = store.read_graph(set_id)
+                waypoints = [
+                    self._waypoint_message(item) for item in route_items
+                ]
+        except (OSError, RouteNotFound, ValueError, yaml.YAMLError) as error:
             response.message = str(error)
             return response
         enabled = [item for item in waypoints if item.enabled]
         if request.command == PatrolCommand.Request.NAVIGATE:
-            selected = next((item for item in enabled if item.id == request.waypoint_id), None)
+            selected = next(
+                (
+                    item for item in enabled
+                    if item.id == request.waypoint_id
+                ),
+                None,
+            )
             if selected is None:
                 response.message = 'Waypoint not found'
                 return response
-            if not self.navigate_client.wait_for_server(timeout_sec=1.0):
-                response.message = 'NavigateToPose action unavailable'
+            try:
+                if selected.id == MAP_DOCK_WAYPOINT_ID:
+                    route_points = [self._waypoint_data(selected)]
+                    route_description = 'direct route to dock'
+                else:
+                    route_points, route_description = self._route_points(
+                        route_items,
+                        route_segments,
+                        route_settings,
+                        selected.id,
+                    )
+            except (RouteNotFound, TypeError, ValueError) as error:
+                response.message = str(error)
                 return response
             self.cancel_requested = False
-            goal = NavigateToPose.Goal()
-            goal.pose = self._pose_from_waypoint(selected)
-            future = self.navigate_client.send_goal_async(goal)
+            if len(route_points) > 1:
+                if not self.route_client.wait_for_server(timeout_sec=1.0):
+                    response.message = (
+                        'NavigateThroughPoses action unavailable'
+                    )
+                    return response
+                goal = NavigateThroughPoses.Goal()
+                goal.poses = self._route_poses(route_points)
+                future = self.route_client.send_goal_async(goal)
+            else:
+                if not self.navigate_client.wait_for_server(timeout_sec=1.0):
+                    response.message = 'NavigateToPose action unavailable'
+                    return response
+                goal = NavigateToPose.Goal()
+                goal.pose = self._pose_from_waypoint(selected)
+                future = self.navigate_client.send_goal_async(goal)
             future.add_done_callback(self._goal_started)
             self.navigation_state = 'navigating'
+            response.success = True
+            response.message = (
+                f'navigating with {len(route_points)} route pose(s): '
+                f'{route_description}'
+            )
+            self.get_logger().info(response.message)
+            return response
         else:
             if not enabled:
                 response.message = 'No enabled waypoints'

@@ -170,19 +170,64 @@ class BaseController(Node):
             self.driver.travel_in_one_rev = 2 * np.pi * self.wheel_radius
             
             # Configure driver
-            self.driver.disable_motor()
-            self.driver.clear_alarm()
-            self.driver.set_mode(3)  # Velocity control mode
-            self.driver.set_accel_time(self.accel_time, self.accel_time)
-            self.driver.set_decel_time(self.decel_time, self.decel_time)
-            self.driver.enable_motor()
+            self._require_modbus_success(
+                self.driver.disable_motor(), 'disable motors'
+            )
+            self._require_modbus_success(
+                self.driver.clear_alarm(), 'clear motor alarms'
+            )
+            self._require_modbus_success(
+                self.driver.set_mode(3), 'select velocity mode'
+            )
+            self._require_modbus_success(
+                self.driver.set_accel_time(
+                    self.accel_time, self.accel_time
+                ),
+                'set acceleration time',
+            )
+            self._require_modbus_success(
+                self.driver.set_decel_time(
+                    self.decel_time, self.decel_time
+                ),
+                'set deceleration time',
+            )
+            actual_accel = self.driver.get_accel_time()
+            actual_decel = self.driver.get_decel_time()
+            expected_accel = (int(self.accel_time), int(self.accel_time))
+            expected_decel = (int(self.decel_time), int(self.decel_time))
+            if actual_accel != expected_accel:
+                raise IOError(
+                    f'acceleration readback {actual_accel} ms does not match '
+                    f'requested {expected_accel} ms'
+                )
+            if actual_decel != expected_decel:
+                raise IOError(
+                    f'deceleration readback {actual_decel} ms does not match '
+                    f'requested {expected_decel} ms'
+                )
+            self._require_modbus_success(
+                self.driver.enable_motor(), 'enable motors'
+            )
             self.driver.reset_encoder()  # Reset odometry tracking
             
-            self.get_logger().info(f'ZLAC8015D driver initialized on {self.port}')
+            self.get_logger().info(
+                f'ZLAC8015D driver initialized on {self.port}; '
+                f'accel={actual_accel} ms, decel={actual_decel} ms'
+            )
             
         except Exception as e:
             self.get_logger().error(f'Failed to initialize ZLAC8015D driver: {e}')
+            if self.driver is not None:
+                self.driver.close()
             self.driver = None
+
+    @staticmethod
+    def _require_modbus_success(response, operation):
+        """Fail initialization when the motor driver rejects a write."""
+        if response is None:
+            raise IOError(f'No Modbus response while trying to {operation}')
+        if hasattr(response, 'isError') and response.isError():
+            raise IOError(f'Modbus rejected request to {operation}: {response}')
 
     def emergency_stop_callback(self, msg: Bool):
         """

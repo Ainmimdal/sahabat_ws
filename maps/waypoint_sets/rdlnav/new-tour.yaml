@@ -1,0 +1,24 @@
+name: New Tour
+revision: 1
+waypoints:
+- id: '0'
+  name: waypoint_1
+  x: 2.461
+  y: 2.427
+  yaw: -2.016
+  dwell_seconds: 0.0
+  enabled: true
+- id: '1'
+  name: waypoint_2
+  x: 2.044
+  y: 1.159
+  yaw: -0.357
+  dwell_seconds: 0.0
+  enabled: true
+- id: '2'
+  name: waypoint_3
+  x: 1.462
+  y: 1.83
+  yaw: 2.491
+  dwell_seconds: 0.0
+  enabled: true

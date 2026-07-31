@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SahaBot App
+Comment=Start the local SahaBot app with native GPU-accelerated Chromium
+Terminal=false
+Path=/home/sahabat/sahabot
+Exec=/home/sahabat/sahabat_ws/scripts/start_sahabot_desktop.sh
+Icon=/home/sahabat/sahabot/public/robot-icon.png
+Categories=Utility;
+StartupNotify=true
+StartupWMClass=SahaBot

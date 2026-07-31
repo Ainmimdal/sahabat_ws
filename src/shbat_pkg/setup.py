@@ -61,6 +61,7 @@ setup(
         ]),
         ('share/' + package_name + '/behavior_trees', [
             'behavior_trees/navigate_to_pose_replan_if_path_invalid.xml',
+            'behavior_trees/navigate_through_poses_smooth_replan.xml',
         ]),
         ('share/' + package_name + '/rviz', [
             'rviz/nav2_test.rviz',

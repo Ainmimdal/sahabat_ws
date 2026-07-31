@@ -109,6 +109,118 @@ ros2 launch shbat_pkg operations.launch.py \
   use_api:=true
 ```
 
+### Local SahaBot web app
+
+The SahaBot LLM interface is installed separately at `~/sahabot`. Run its ROS
+API bridge on loopback so the unauthenticated command API is not exposed:
+
+```bash
+cd ~/sahabat_ws
+source install/setup.bash
+API_HOST=127.0.0.1 ros2 launch shbat_pkg operations.launch.py \
+  map_file:=/home/sahabat/sahabat_ws/maps/rdlfront \
+  use_api:=true
+```
+
+Start the built web app in a second terminal:
+
+```bash
+cd ~/sahabot
+~/sahabat_ws/scripts/start_sahabot_desktop.sh
+```
+
+Open `http://127.0.0.1:8000`. Ainmimdal's May 15 web gateway maps its
+`station-1` through `station-6` cards to the logical names `waypoint_1` through
+`waypoint_6`. The robot API resolves those names against the active online
+waypoint-editor map and set through `/operator/...` services. The browser does
+not send map coordinates.
+
+When using **Sahabat Waypoint Editor Live**, its launcher starts the same
+loopback-only API automatically. Select an editor set containing waypoints
+named `waypoint_1` through `waypoint_6` before using the corresponding SahaBot
+station buttons. Keep the API on loopback; it is unauthenticated.
+
+### Preferred routes and doorway approaches
+
+Waypoint sets may contain a sparse graph of human-approved `segments`. Each
+segment connects two normal destination waypoint IDs and contains zero or more
+`via_points`. The operator backend finds the closest current destination,
+searches the connected graph, and sends all resulting route points through one
+`NavigateThroughPoses` action. Intermediate points shape the path but do not
+produce waypoint-follower pauses.
+
+Use a bidirectional segment when the same path is safe in both directions. Its
+via-point order is reversed automatically. Use two one-way segments when a
+door or blind corner needs different entry geometry in each direction. For a
+narrow doorway, place one point on each side of the opening, aligned through
+its center; do not place only one point directly in the opening.
+
+Edit these routes in the same RViz waypoint editor. For an offline
+`gallerysq4` session with no robot bringup:
+
+```bash
+cd ~/sahabat_ws
+source install/setup.bash
+ros2 launch shbat_pkg waypoint_editor.launch.py \
+  map_id:=gallerysq4 waypoint_backend:=local start_map_server:=true
+```
+
+Open the **Routes** tab. Choose an entry under **1. Select route** to edit it;
+that route becomes thick and bright cyan while other routes are faded. The
+large **SELECTED ROUTE** banner stays fixed at the top of the panel while its
+contents scroll, and route selection is preserved across list refreshes. The
+**Points in selected route (travel order)** list shows exactly what Nav2 will
+receive between the two destination waypoints. Select a row to **Move Up**,
+**Move Down**, or **Remove** it from the selected route.
+
+On the map, the selected path is the thick bright-cyan line. Its route points
+use their permanent map-wide IDs, such as `rp-001`, directly. The same ID is
+shown in both sidebar lists; there is no separate generated display number to
+change when points are added or removed. Only points in the selected route
+capture viewport clicks; their larger cyan halo and label are both draggable
+selection targets. New points receive the next unused `rp-NNN` ID.
+
+The **All route points on this map** list is the reusable point library. It
+shows how many routes use every point and marks points already in the selected
+route. Multiple rows may be selected at once:
+
+- **Add New Point to Selected Route** switches RViz to the waypoint tool. The
+  next map click creates a draggable cyan point on the selected route.
+- **Add to Route** attaches the selected existing points to the
+  end of the route. Shared points keep one ID and pose, so moving or renaming
+  one updates every route using it.
+- **Delete from Map** removes the selected points from every route and requires
+  confirmation. Use **Remove** instead when the point
+  should remain available to other routes.
+
+To make a new route, open **New Route**, choose **From** and **To**, set
+**Bidirectional**, then press **Create Route**. Return to **Routes** to define
+its ordered route points.
+
+Right-click a cyan point to rename it, move it earlier or later within the
+selected route, or remove it from that route. Use **Save WPs + Routes** to
+persist both destinations and route points. Fully restart RViz after rebuilding
+the plugin because an already-running RViz process keeps the previous shared
+library loaded.
+
+The active `gallerysq4/new-tour` set contains six one-way connections forming a
+clockwise ring: `waypoint_1` through `waypoint_6`, then back to `waypoint_1`.
+Every destination can reach every other destination by continuing clockwise.
+Its `rp-NNN` points keep each Nav2 request on the approved corridor and doorway
+approaches. The cyan `/waypoint_markers` lines are the saved preferred routes.
+The thick magenta `/plan` line is the actual current Nav2 plan and may deviate
+locally to avoid an obstacle.
+
+Route settings support:
+
+- `route_origin_tolerance`: maximum distance from the robot to the nearest
+  destination used as the graph origin.
+- `direct_fallback: warn`: log and use direct Nav2 planning if the graph cannot
+  be used.
+- `direct_fallback: reject`: reject navigation unless a preferred graph route
+  exists. Use this only after every expected origin, including the dock, has
+  been connected and physically tested.
+
 ZED and remote visualization remain opt-in:
 
 ```bash
@@ -149,6 +261,21 @@ ros2 run tf2_ros tf2_echo odom base_link
 Before sending a navigation goal, confirm that the scan aligns with walls,
 odometry moves in the correct direction, and the emergency stop latches.
 
+For gallery route and motion tuning, confirm that normal velocity has exactly
+one final publisher and record both the requested and delivered commands:
+
+```bash
+ros2 topic info /cmd_vel --verbose
+ros2 bag record \
+  /plan /global_costmap/costmap /local_costmap/costmap \
+  /cmd_vel_nav /cmd_vel_nav_smoothed /cmd_vel \
+  /joy /odom /wheel_odom
+```
+
+In the canonical operations launch, `/cmd_vel` should list only
+`/command_arbiter`. The base-controller startup log must also show the motor
+acceleration and deceleration register readback before the motor test begins.
+
 ### Known-good Nav2 motion baseline
 
 The following values in `config/nav2_odom_only.yaml` produced good supervised
@@ -164,13 +291,19 @@ motion on June 20, 2026 and are the rollback point for future tuning:
 This combination reduced curve overshoot and abrupt normal stopping without
 reintroducing the low-angular-command drivetrain deadlock.
 
+The July 31 gallery candidate changes the cruise to 0.42 m/s, uses
+SmacPlanner2D plus collision-checked path smoothing, pivots only above 0.6 rad,
+and accepts 0.10 m / 0.12 rad final pose error. These values are not yet a
+physical baseline. The command arbiter must be the sole normal `/cmd_vel`
+publisher during this test.
+
 After changing Nav2 speed or controller tuning, use a clear straight test lane
 with a person beside the emergency stop. Start with a short goal at 0.2 m/s,
-then repeat at the configured 0.3 m/s cruise before allowing the 0.5 m/s
-command cap. Test a wide 90-degree turn separately and confirm the lidar scan
-stays aligned with walls. Stop the test if wheel odometry jumps, the scan
-smears, the controller oscillates, or stopping distance is unsafe. Keep angular
-velocity at or below
+then repeat at 0.3 m/s before testing the 0.42 m/s candidate or allowing the
+0.5 m/s command cap. Test a wide 90-degree turn separately and confirm the
+lidar scan stays aligned with walls. Stop the test if wheel odometry jumps, the
+scan smears, the controller oscillates, or stopping distance is unsafe. Keep
+angular velocity at or below
 0.5 rad/s until a higher rate passes a logged lidar/localization test.
 During the turn test, small heading corrections should form a continuous arc;
 larger initial heading errors may cause an in-place pivot. Stop and

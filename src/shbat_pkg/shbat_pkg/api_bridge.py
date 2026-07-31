@@ -26,13 +26,16 @@ from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
-from geometry_msgs.msg import PoseStamped, Twist, PoseWithCovarianceStamped
+from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
 from nav2_msgs.action import NavigateToPose, FollowWaypoints
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool, String
 from action_msgs.msg import GoalStatus
+from sahabat_interfaces.msg import OperatorStatus
+from sahabat_interfaces.srv import ControlLease, GetWaypoints, PatrolCommand
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -73,6 +76,7 @@ class RobotStatus:
     current_goal_y: Optional[float] = None
     current_waypoint_index: int = 0
     total_waypoints: int = 0
+    emergency_stop_active: bool = False
     is_stuck: bool = False
     stuck_duration: float = 0.0
     error_message: str = ""
@@ -111,10 +115,34 @@ class APIBridgeNode(Node):
         self.waypoint_client = ActionClient(
             self, FollowWaypoints, 'follow_waypoints',
             callback_group=self.callback_group)
+        self.operator_waypoints_client = self.create_client(
+            GetWaypoints,
+            '/operator/waypoints/get',
+            callback_group=self.callback_group,
+        )
+        self.operator_lease_client = self.create_client(
+            ControlLease,
+            '/operator/control_lease',
+            callback_group=self.callback_group,
+        )
+        self.operator_patrol_client = self.create_client(
+            PatrolCommand,
+            '/operator/patrol',
+            callback_group=self.callback_group,
+        )
+        self.operator_active_map = ''
+        self.operator_command_lock = threading.Lock()
+
+        estop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
         
         # Publishers
-        self.cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 10)
-        self.estop_pub = self.create_publisher(Bool, '/emergency_stop', 10)
+        self.estop_pub = self.create_publisher(
+            Bool, '/emergency_stop', estop_qos
+        )
         self.status_pub = self.create_publisher(String, '/robot_status', 10)
         self.exhibit_cmd_pub = self.create_publisher(String, '/exhibit_command', 10)
         
@@ -130,6 +158,17 @@ class APIBridgeNode(Node):
         self.amcl_pose_sub = self.create_subscription(
             PoseWithCovarianceStamped, '/amcl_pose', self.amcl_pose_callback, 10,
             callback_group=self.callback_group)
+
+        self.estop_sub = self.create_subscription(
+            Bool, '/emergency_stop', self.estop_callback, estop_qos,
+            callback_group=self.callback_group)
+        self.operator_status_sub = self.create_subscription(
+            OperatorStatus,
+            '/operator/status',
+            self.operator_status_callback,
+            10,
+            callback_group=self.callback_group,
+        )
         
         # Timer for stuck detection and status publishing
         self.status_timer = self.create_timer(
@@ -188,6 +227,146 @@ class APIBridgeNode(Node):
         self.status.orientation_yaw = math.atan2(
             2.0 * (q.w * q.z + q.x * q.y),
             1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+    def estop_callback(self, msg: Bool):
+        """Mirror the latched stop state for local web clients."""
+        self.status.emergency_stop_active = bool(msg.data)
+
+    def operator_status_callback(self, msg: OperatorStatus):
+        """Mirror the active map and high-level navigation state."""
+        self.operator_active_map = msg.active_map
+        self.status.position_x = msg.pose.x
+        self.status.position_y = msg.pose.y
+        self.status.orientation_yaw = msg.pose.theta
+        self.status.linear_velocity = msg.linear_velocity
+        self.status.angular_velocity = msg.angular_velocity
+        self.status.battery_percentage = msg.battery_percentage
+        self.status.emergency_stop_active = msg.emergency_stop
+        if msg.navigation_state:
+            self.status.nav_state = msg.navigation_state
+
+    @staticmethod
+    def _call_service(client, request, timeout: float = 3.0):
+        """Call a ROS service from a Flask worker while ROS spins elsewhere."""
+        if not client.wait_for_service(timeout_sec=min(timeout, 1.0)):
+            raise RuntimeError(f'ROS service unavailable: {client.srv_name}')
+        completed = threading.Event()
+        future = client.call_async(request)
+        future.add_done_callback(lambda _future: completed.set())
+        if not completed.wait(timeout):
+            raise RuntimeError(f'ROS service timed out: {client.srv_name}')
+        error = future.exception()
+        if error is not None:
+            raise RuntimeError(str(error))
+        return future.result()
+
+    def _active_map_id(self) -> str:
+        """Return the live operator map, with the editor state file as fallback."""
+        if self.operator_active_map:
+            return self.operator_active_map
+        selected = os.path.expanduser('~/sahabat_ws/maps/last_selected_map')
+        try:
+            with open(selected, 'r', encoding='utf-8') as stream:
+                return stream.read().strip()
+        except OSError:
+            return ''
+
+    def get_operator_waypoints(self):
+        """Load the active editor waypoint set through operator_backend."""
+        map_id = self._active_map_id()
+        if not map_id:
+            raise RuntimeError('The waypoint editor has no active map')
+        request = GetWaypoints.Request()
+        request.map_id = map_id
+        request.set_id = ''
+        response = self._call_service(
+            self.operator_waypoints_client, request
+        )
+        if not response.set_id:
+            raise RuntimeError(response.message or 'No active waypoint set')
+        return map_id, response
+
+    def list_operator_waypoints(self):
+        """Return enabled named waypoints from the active editor set."""
+        map_id, response = self.get_operator_waypoints()
+        return {
+            'map_id': map_id,
+            'set_id': response.set_id,
+            'waypoints': [
+                {
+                    'id': waypoint.id,
+                    'name': waypoint.name,
+                    'enabled': waypoint.enabled,
+                }
+                for waypoint in response.waypoints
+                if waypoint.enabled
+            ],
+        }
+
+    def operator_patrol_command(
+        self, command: int, waypoint_name: str = ''
+    ):
+        """Send a named command through operator_backend's lease boundary."""
+        with self.operator_command_lock:
+            set_id = ''
+            waypoint_id = ''
+            if command == PatrolCommand.Request.NAVIGATE:
+                _map_id, waypoints = self.get_operator_waypoints()
+                selected = next(
+                    (
+                        waypoint for waypoint in waypoints.waypoints
+                        if waypoint.enabled
+                        and waypoint_name in (waypoint.name, waypoint.id)
+                    ),
+                    None,
+                )
+                if selected is None:
+                    available = ', '.join(
+                        waypoint.name for waypoint in waypoints.waypoints
+                        if waypoint.enabled
+                    )
+                    raise ValueError(
+                        f'Waypoint {waypoint_name!r} not found in active set '
+                        f'{waypoints.set_id!r}; available: {available or "none"}'
+                    )
+                set_id = waypoints.set_id
+                waypoint_id = selected.id
+
+            lease_request = ControlLease.Request()
+            lease_request.action = ControlLease.Request.ACQUIRE
+            lease_request.client_id = 'sahabot'
+            lease = self._call_service(
+                self.operator_lease_client, lease_request
+            )
+            if not lease.success:
+                raise RuntimeError(lease.message or 'Control lease denied')
+
+            try:
+                patrol_request = PatrolCommand.Request()
+                patrol_request.command = command
+                patrol_request.set_id = set_id
+                patrol_request.waypoint_id = waypoint_id
+                patrol_request.loop = False
+                patrol_request.lease_id = lease.lease_id
+                result = self._call_service(
+                    self.operator_patrol_client, patrol_request
+                )
+                if not result.success:
+                    raise RuntimeError(
+                        result.message or 'Operator command rejected'
+                    )
+                return {'success': True, 'message': result.message}
+            finally:
+                release = ControlLease.Request()
+                release.action = ControlLease.Request.RELEASE
+                release.client_id = 'sahabot'
+                release.lease_id = lease.lease_id
+                try:
+                    self._call_service(
+                        self.operator_lease_client, release, timeout=1.0
+                    )
+                except RuntimeError as error:
+                    self.get_logger().warn(str(error))
     
     def status_check_callback(self):
         """Check for stuck condition and publish status"""
@@ -224,6 +403,9 @@ class APIBridgeNode(Node):
     
     def navigate_to_pose(self, x: float, y: float, yaw: float = 0.0) -> bool:
         """Send navigation goal"""
+        if self.status.emergency_stop_active:
+            self.status.error_message = "Emergency stop is active"
+            return False
         if not self.nav_client.wait_for_server(timeout_sec=2.0):
             self.status.error_message = "Navigation server not available"
             return False
@@ -376,15 +558,9 @@ class APIBridgeNode(Node):
     
     def set_emergency_stop(self, active: bool = True):
         """Set the base controller's latched emergency-stop state."""
+        self.status.emergency_stop_active = active
         if active:
             self.cancel_navigation()
-
-            # Stop promptly while the latched command propagates to the motor
-            # controller. The latch then rejects later velocity commands.
-            stop_cmd = Twist()
-            for _ in range(5):
-                self.cmd_vel_pub.publish(stop_cmd)
-
             self.status.nav_state = NavState.IDLE.value
 
         self.estop_pub.publish(Bool(data=active))
@@ -447,11 +623,47 @@ def create_flask_app() -> Flask:
         success = ros_node.navigate_to_pose(float(x), float(y), float(yaw))
         return jsonify({'success': success, 'message': ros_node.status.error_message or 'Navigation started'})
     
+    @app.route('/exhibit/list', methods=['GET'])
+    def exhibit_list():
+        """List named waypoints from the active online editor set."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.list_operator_waypoints())
+        except RuntimeError as error:
+            return jsonify({'error': str(error)}), 503
+
+    @app.route('/exhibit/status', methods=['GET'])
+    def exhibit_status():
+        """Return the status shape expected by Ainmimdal's May client."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        status = ros_node.get_status()
+        return jsonify({
+            'state': status['nav_state'],
+            'current_exhibit': '',
+            'target_exhibit': '',
+            'is_touring': status['nav_state'] == NavState.PATROLLING.value,
+            'tour_progress': (
+                f"{status['current_waypoint_index']}/"
+                f"{status['total_waypoints']}"
+            ),
+            'robot_position': {
+                'x': status['position_x'],
+                'y': status['position_y'],
+                'yaw': status['orientation_yaw'],
+            },
+            'battery_level': status['battery_percentage'],
+            'is_obstructed': status['is_stuck'],
+            'emergency_stop_active': status['emergency_stop_active'],
+            'error_message': status['error_message'],
+        })
+
     @app.route('/exhibit/goto', methods=['POST'])
     def exhibit_goto():
-        """Forward exhibit command to exhibit navigator
+        """Navigate to a named waypoint in the active online editor set.
         
-        Body: {"exhibit": "exhibit_a"}
+        Body: {"exhibit": "waypoint_1"}
         """
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
@@ -461,14 +673,70 @@ def create_flask_app() -> Flask:
             return jsonify({'error': 'No JSON data provided'}), 400
         
         exhibit = data.get('exhibit')
-        action = data.get('action', 'goto')
-        exhibits = data.get('exhibits')
-        
-        if action in ('goto', 'stop', 'pause', 'resume', 'start_tour', 'list_exhibits'):
-            ros_node.send_exhibit_command(action, exhibit=exhibit, exhibits=exhibits)
-            return jsonify({'success': True, 'action': action, 'exhibit': exhibit})
-        
-        return jsonify({'error': f'Unknown action: {action}'}), 400
+        if not isinstance(exhibit, str) or not exhibit.strip():
+            return jsonify({'error': 'exhibit name is required'}), 400
+        try:
+            result = ros_node.operator_patrol_command(
+                PatrolCommand.Request.NAVIGATE,
+                exhibit.strip(),
+            )
+            return jsonify({
+                **result,
+                'action': 'goto',
+                'exhibit': exhibit.strip(),
+            })
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 404
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/stop', methods=['POST'])
+    def exhibit_stop():
+        """Cancel navigation through the operator safety boundary."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.operator_patrol_command(
+                PatrolCommand.Request.STOP
+            ))
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/pause', methods=['POST'])
+    def exhibit_pause():
+        """Pause navigation through the operator safety boundary."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.operator_patrol_command(
+                PatrolCommand.Request.PAUSE
+            ))
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/resume', methods=['POST'])
+    def exhibit_resume():
+        """Resume the active set through the operator safety boundary."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.operator_patrol_command(
+                PatrolCommand.Request.RESUME
+            ))
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/start_tour', methods=['POST'])
+    def exhibit_start_tour():
+        """Start the active editor waypoint set once."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.operator_patrol_command(
+                PatrolCommand.Request.START
+            ))
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
     
     @app.route('/waypoints', methods=['GET'])
     def get_waypoints():
@@ -618,7 +886,8 @@ def main(args=None):
     finally:
         _flask_stop = True
         ros_node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
