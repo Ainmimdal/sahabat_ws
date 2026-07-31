@@ -63,6 +63,7 @@ class JunctekMonitorApp:
         self.setting_vars = {
             name: tk.StringVar(value='') for name in SETTING_ORDER
         }
+        self.setting_widgets = {}
         self._build_ui()
         self.root.after(100, self._drain_events)
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
@@ -160,6 +161,7 @@ class JunctekMonitorApp:
                     settings, textvariable=self.setting_vars[name], width=26
                 )
             widget.grid(row=row, column=1, sticky='ew', pady=3)
+            self.setting_widgets[name] = widget
             ttk.Label(settings, text=spec.unit).grid(
                 row=row, column=2, sticky='w', padx=6
             )
@@ -411,12 +413,18 @@ class JunctekMonitorApp:
         values = settings.as_dict()
         for name in SETTING_ORDER:
             value = values[name]
-            if name == 'relay_normally_closed':
+            if value is None:
+                text = 'Unsupported by this firmware'
+                self.setting_widgets[name].configure(state='disabled')
+            elif name == 'relay_normally_closed':
                 text = 'Normally closed' if value else 'Normally open'
+                self.setting_widgets[name].configure(state='readonly')
             elif SETTING_SPECS[name].integer:
                 text = str(int(value))
+                self.setting_widgets[name].configure(state='normal')
             else:
                 text = f'{float(value):g}'
+                self.setting_widgets[name].configure(state='normal')
             self.setting_vars[name].set(text)
         self.live_vars['capacity_ah'].set(f'{settings.capacity_ah:.1f} Ah')
         self._append_log('Settings refreshed from KG-F')
@@ -462,6 +470,8 @@ class JunctekMonitorApp:
         changes = {}
         try:
             for name in SETTING_ORDER:
+                if previous[name] is None:
+                    continue
                 text = self.setting_vars[name].get().strip()
                 if name == 'relay_normally_closed':
                     value = 1 if text == 'Normally closed' else 0

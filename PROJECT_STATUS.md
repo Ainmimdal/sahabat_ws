@@ -29,8 +29,10 @@
 - JUNCTEK KG-F battery support publishes `/battery_state`, `/diagnostics`, and
   `/junctek/state`. The KG110F is connected through a QinHeng USB-RS485 adapter
   and receives the stable `/dev/junctek` name from the workspace udev rules.
-  Protocol reads on the physical meter remain pending until those rules are
-  installed with administrator privileges.
+  Physical protocol reads and the ROS/desktop data paths are verified against
+  model code 2110, firmware 1.32, serial 2527. Remaining capacity still needs
+  initialization after a confirmed full charge; the meter currently reports
+  0.000 Ah remaining against its configured 20.0 Ah capacity.
 
 ## ✅ Current Working Setup
 
@@ -42,7 +44,7 @@
 | LIDAR | RPLIDAR S2 | FTDI (custom) | `/dev/ttyUSBx` (auto-probed) | 1,000,000 | ✅ Working (10 Hz, DenseBoost) |
 | IMU | HWT901B (WITMotion) | CH340/CP2102 | `/dev/ttyUSBx` (auto-probed) | 115200 | ✅ Working (USB power-dependent) |
 | Camera | ZED 2i | USB 3.0 | Direct | - | ✅ Working |
-| Battery Monitor | JUNCTEK KG110F (KG-F) | RS485/QinHeng USB | `/dev/junctek` → ttyACMx | 115200 | 🟡 Driver detected; live protocol check pending |
+| Battery Monitor | JUNCTEK KG110F (KG-F) | RS485/QinHeng USB | `/dev/junctek` → ttyACMx | 115200 | ✅ Live reads working |
 
 **Important Notes:**
 - **RPLIDAR S2**: Mounted upside-down, 7cm forward of wheel axle. Connected via custom FTDI adapter (original USB cable broken). Needs **direct USB port** (not through hub) for adequate motor power. DenseBoost scan mode at 10 Hz / 32 KHz.
@@ -85,7 +87,7 @@
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
 | Waypoint Manager | `shbat_pkg/waypoint_manager` | ✅ Working (GUI) |
 | ZED Obstacle Detection | VoxelLayer + PointCloud2 | ✅ Launchable from operations and mapping paths with `use_zed:=true` |
-| Battery Monitor | `shbat_pkg/junctek_battery` | 🟡 Implemented; physical KG110F read pending |
+| Battery Monitor | `shbat_pkg/junctek_battery` | ✅ ROS and desktop live reads working |
 
 ---
 
@@ -306,7 +308,8 @@ ls /dev/input/js*
 - [ ] Add voice/audio feedback for tour guide functionality
 - [ ] Test full patrol workflow in production environment
 - [ ] Remote visualization solution for gallery deployment (Foxglove/VNC)
-- [ ] Complete physical KG110F read and battery-percentage verification
+- [x] ~~JUNCTEK KG110F ROS and desktop battery monitoring integration~~
+- [ ] Initialize KG110F remaining capacity after a confirmed full charge and verify its temperature input
 - [ ] AprilTag docking for precise exhibit positioning (optional)
 
 ---

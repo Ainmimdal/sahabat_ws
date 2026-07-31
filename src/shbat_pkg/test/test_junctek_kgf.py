@@ -53,6 +53,22 @@ def test_parse_manual_settings_example():
     assert settings.temperature_calibration == 1
 
 
+def test_parse_kg110f_firmware_132_settings_and_measurement():
+    settings = parse_settings(
+        ':r51=1,92,0,0,0,0,0,100,0,0,200,100,100,100,0,0,1,'
+    )
+    measurement = parse_measurement(
+        ':r50=1,45,2638,93,0,24003,8,107797,79,0,0,0,0,1086,'
+    )
+    assert settings.capacity_ah == pytest.approx(20.0)
+    assert settings.current_ratio == 1
+    assert settings.voltage_curve_scale is None
+    assert settings.current_curve_scale is None
+    assert measurement.voltage_v == pytest.approx(26.38)
+    assert measurement.current_magnitude_a == pytest.approx(0.93)
+    assert measurement.power_magnitude_w == pytest.approx(24.5334)
+
+
 def test_setting_encoding_and_range_validation():
     assert SETTING_SPECS['capacity_ah'].encode(200.0) == 2000
     assert SETTING_SPECS['over_temperature_c'].encode(50.0) == 150

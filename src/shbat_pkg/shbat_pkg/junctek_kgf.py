@@ -100,8 +100,8 @@ class Settings:
     reserved: int
     relay_normally_closed: bool
     current_ratio: int
-    voltage_curve_scale: int
-    current_curve_scale: int
+    voltage_curve_scale: Optional[int]
+    current_curve_scale: Optional[int]
 
     def as_dict(self):
         return asdict(self)
@@ -283,7 +283,9 @@ def parse_measurement(line: str) -> Measurement:
         energy_wh=values[4] / 100.0,
         runtime_s=values[5],
         temperature_c=values[6] - 100.0,
-        power_magnitude_w=values[7] / 100.0,
+        # R50 field 8 is reserved on the KG-F protocol. Calculate power from
+        # voltage and current rather than presenting that reserved value.
+        power_magnitude_w=(values[0] / 100.0) * (values[1] / 100.0),
         output_status=values[8],
         current_direction=values[9],
         battery_life_min=values[10],
@@ -293,9 +295,9 @@ def parse_measurement(line: str) -> Measurement:
 
 def parse_settings(line: str) -> Settings:
     _function, address, values = parse_response(line, 51)
-    if len(values) < 17:
+    if len(values) < 15:
         raise JunctekProtocolError(
-            f'KG-F settings response has {len(values)} fields; expected 17'
+            f'KG-F settings response has {len(values)} fields; expected at least 15'
         )
     return Settings(
         address=address,
@@ -314,8 +316,8 @@ def parse_settings(line: str) -> Settings:
         reserved=values[12],
         relay_normally_closed=bool(values[13]),
         current_ratio=values[14],
-        voltage_curve_scale=values[15],
-        current_curve_scale=values[16],
+        voltage_curve_scale=values[15] if len(values) > 15 else None,
+        current_curve_scale=values[16] if len(values) > 16 else None,
     )
 
 

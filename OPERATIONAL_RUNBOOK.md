@@ -364,6 +364,13 @@ factory reset additionally requires typing `RESET`. Confirm protection limits,
 capacity, shunt/current ratio, relay type, and calibration against the physical
 battery system before changing them.
 
+If `/battery_state` reports zero `charge` and `percentage` while the battery is
+not actually empty, the KG-F coulomb counter has not been initialized. Fully
+charge the battery, confirm its configured Ah capacity, stop the ROS battery
+node, then use **Maintenance → Set remaining percentage → 100%** in the desktop
+monitor. Do not initialize it to 100% from voltage alone. The value then tracks
+charge and discharge by coulomb counting.
+
 ## LIDAR-only diagnostics
 
 Stop other robot launches first so only one process opens the serial port. Find
