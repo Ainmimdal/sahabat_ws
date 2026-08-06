@@ -40,8 +40,9 @@
   confirmed exhibit until an explicit Next or destination command.
 - SahaBot navigation speech is driven by accepted, progress, blocked, and
   completed mission events. Exhibit narration is gated on confirmed arrival.
-  Deepgram MP3 audio is cached per voice under `~/.cache/sahabot/tts`, and the
-  app exposes map-aware availability plus an operator-only dock control.
+  Soniox Mason MP3 audio is cached per voice and synthesis profile under
+  `~/.cache/sahabot/tts`, and the app exposes map-aware availability plus an
+  operator-only dock control.
 
 ## ✅ Current Working Setup
 

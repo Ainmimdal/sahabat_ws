@@ -195,12 +195,13 @@ Settings -> Operator Controls. The button is disabled when the active map has
 no `maps/waypoint_sets/<map_id>/dock.yaml`. The robot does not automatically
 return to dock after the final exhibit.
 
-Deepgram speech audio is cached under `~/.cache/sahabot/tts` using the provider,
-voice, normalized text, language, and format as the cache identity. Changing
-the Deepgram voice in SahaBot Settings selects a different cache namespace, so
-audio from the previous voice is not replayed. The kiosk browser remembers the
-selected voice and reapplies it when the app reconnects. The default cache
-limit is 512 MB and can be changed with `TTS_CACHE_MAX_MB`.
+Soniox speech audio is cached under `~/.cache/sahabot/tts` using the provider,
+model, voice, normalized text, language, and format as the cache identity.
+Changing the Soniox voice in SahaBot Settings selects a different cache
+namespace, so audio from the previous voice is not replayed. The kiosk browser
+remembers the selected voice and reapplies it when the app reconnects. Mason is
+the default voice. The default cache limit is 512 MB and can be changed with
+`TTS_CACHE_MAX_MB`.
 
 ### Preferred routes and doorway approaches
 
