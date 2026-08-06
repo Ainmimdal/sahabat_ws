@@ -114,6 +114,16 @@ def generate_launch_description():
         description='Launch API Bridge for external control (Pi/LLM)'
     )
     use_api = LaunchConfiguration('use_api')
+
+    tour_profile_arg = DeclareLaunchArgument(
+        'tour_profile',
+        default_value='auto',
+        choices=['auto', 'production', 'test'],
+        description=(
+            'Strict six-exhibit production validation or permissive test map'
+        ),
+    )
+    tour_profile = LaunchConfiguration('tour_profile')
     
     use_waypoint_gui_arg = DeclareLaunchArgument(
         'use_waypoint_gui',
@@ -243,6 +253,7 @@ def generate_launch_description():
         executable='api_bridge',
         name='api_bridge',
         output='screen',
+        parameters=[{'tour_profile': tour_profile}],
         condition=IfCondition(use_api),
     )
 
@@ -302,6 +313,7 @@ def generate_launch_description():
         use_rviz_arg,
         use_foxglove_arg,
         use_api_arg,
+        tour_profile_arg,
         use_waypoint_gui_arg,
         joy_cmd_topic_arg,
         smoothed_cmd_topic_arg,

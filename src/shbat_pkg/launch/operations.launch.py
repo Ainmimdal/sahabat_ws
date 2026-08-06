@@ -18,6 +18,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    """Build the canonical gallery localization and tour launch graph."""
     pkg_share = get_package_share_directory('shbat_pkg')
 
     names_and_defaults = [
@@ -29,6 +30,7 @@ def generate_launch_description():
         ('use_rviz', 'true'),
         ('use_foxglove', 'false'),
         ('use_api', 'false'),
+        ('tour_profile', 'auto'),
         ('use_waypoint_gui', 'true'),
         ('localization_backend', 'amcl'),
         ('joy_cmd_topic', 'cmd_vel_joy'),

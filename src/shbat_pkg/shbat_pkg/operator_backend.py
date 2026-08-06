@@ -108,6 +108,7 @@ class OperatorBackend(Node):
         self.angular_velocity = 0.0
         self.current_goal_handle = None
         self.cancel_requested = False
+        self.goal_generation = 0
         self.last_map = 0.0
         self.last_scan = 0.0
         self.last_amcl_pose = 0.0
@@ -707,6 +708,7 @@ class OperatorBackend(Node):
                 response.message = 'Robot must be stationary before recovery'
                 return response
             if self.current_goal_handle is not None:
+                self.goal_generation += 1
                 self.current_goal_handle.cancel_goal_async()
                 self.current_goal_handle = None
                 self.navigation_state = 'idle'
@@ -1024,7 +1026,9 @@ class OperatorBackend(Node):
                 ManageWaypointSet.Request.DELETE,
                 ManageWaypointSet.Request.SELECT,
             )
-            and self.navigation_state in ('navigating', 'patrolling')
+            and self.navigation_state in (
+                'goal_pending', 'navigating', 'patrolling', 'paused'
+            )
         ):
             response.message = 'Stop navigation before changing waypoint sets'
             return response
@@ -1338,6 +1342,7 @@ class OperatorBackend(Node):
             PatrolCommand.Request.PAUSE,
         ):
             self.cancel_requested = True
+            self.goal_generation += 1
             if self.current_goal_handle is not None:
                 self.current_goal_handle.cancel_goal_async()
                 self.current_goal_handle = None
@@ -1427,8 +1432,12 @@ class OperatorBackend(Node):
                 goal = NavigateToPose.Goal()
                 goal.pose = self._pose_from_waypoint(selected)
                 future = self.navigate_client.send_goal_async(goal)
-            future.add_done_callback(self._goal_started)
-            self.navigation_state = 'navigating'
+            self.goal_generation += 1
+            generation = self.goal_generation
+            future.add_done_callback(
+                lambda done: self._goal_started(done, generation)
+            )
+            self.navigation_state = 'goal_pending'
             response.success = True
             response.message = (
                 f'navigating with {len(route_points)} route pose(s): '
@@ -1447,7 +1456,11 @@ class OperatorBackend(Node):
             goal = FollowWaypoints.Goal()
             goal.poses = [self._pose_from_waypoint(item) for item in enabled]
             future = self.patrol_client.send_goal_async(goal)
-            future.add_done_callback(self._goal_started)
+            self.goal_generation += 1
+            generation = self.goal_generation
+            future.add_done_callback(
+                lambda done: self._goal_started(done, generation)
+            )
             self.navigation_state = 'patrolling'
         response.success = True
         response.message = self.navigation_state
@@ -1463,25 +1476,36 @@ class OperatorBackend(Node):
         pose.pose.orientation.w = math.cos(waypoint.pose.theta / 2.0)
         return pose
 
-    def _goal_started(self, future) -> None:
+    def _goal_started(self, future, generation: int) -> None:
         try:
             handle = future.result()
+            if generation != self.goal_generation:
+                if handle.accepted:
+                    handle.cancel_goal_async()
+                return
             if not handle.accepted:
                 self.navigation_state = 'rejected'
                 return
             if self.cancel_requested or self.navigation_state not in (
-                'navigating',
+                'goal_pending',
                 'patrolling',
             ):
                 handle.cancel_goal_async()
                 return
+            if self.navigation_state == 'goal_pending':
+                self.navigation_state = 'navigating'
             self.current_goal_handle = handle
             result = handle.get_result_async()
-            result.add_done_callback(self._goal_finished)
+            result.add_done_callback(
+                lambda done: self._goal_finished(done, generation)
+            )
         except Exception as error:
-            self.navigation_state = f'failed: {error}'
+            if generation == self.goal_generation:
+                self.navigation_state = f'failed: {error}'
 
-    def _goal_finished(self, future) -> None:
+    def _goal_finished(self, future, generation: int) -> None:
+        if generation != self.goal_generation:
+            return
         try:
             result = future.result()
             self.navigation_state = 'complete' if result.status == 4 else 'idle'

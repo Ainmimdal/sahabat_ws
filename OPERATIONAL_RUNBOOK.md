@@ -140,6 +140,68 @@ loopback-only API automatically. Select an editor set containing waypoints
 named `waypoint_1` through `waypoint_6` before using the corresponding SahaBot
 station buttons. Keep the API on loopback; it is unauthenticated.
 
+#### SahaBot tour profiles and first-version interaction
+
+SahaBot resolves logical stations against the active map waypoint set. It does
+not receive or store map coordinates in the browser. The `auto` tour profile
+treats `gallerysq4` as strict production data and other maps as permissive test
+data. Production requires all six names from `waypoint_1` through
+`waypoint_6`; test maps may provide any subset.
+
+Run the strict gallery profile with:
+
+```bash
+ros2 launch shbat_pkg operations.launch.py \
+  map_file:=/home/sahabat/sahabat_ws/maps/gallerysq4 \
+  map_id:=gallerysq4 use_api:=true tour_profile:=production
+```
+
+Exercise the partial `rdlsabtu/tests` set without a motor controller with:
+
+```bash
+ros2 launch shbat_pkg operations.launch.py \
+  map_file:=/home/sahabat/sahabat_ws/maps/rdlsabtu \
+  map_id:=rdlsabtu use_api:=true tour_profile:=test \
+  use_hardware:=false use_zed:=false use_battery_monitor:=false
+```
+
+That non-motion launch validates the profile, station availability, UI, and
+rejection paths; navigation stays disabled because live localization and scan
+health are required. Exercise departure, pause/resume, blocked, arrival, and
+Next behavior on `rdlsabtu` only in a separate supervised `use_hardware:=true`
+run with a person beside the E-stop.
+
+In test mode, missing station cards are dimmed but remain browseable; their
+**Take Me There** action is disabled. A direct request for a missing station is
+rejected before a Nav2 goal is sent. **Next Exhibit** skips missing stations
+and stops at the final available exhibit; it never wraps to the first station.
+After every confirmed arrival the robot stays in place until a visitor or
+operator requests another destination. **Start Tour** goes to the first
+available exhibit only; it does not launch an unattended waypoint patrol.
+
+Visitor speech is event-driven. Departure is announced only after Nav2 accepts
+the goal, **almost there** is emitted once only on a sufficiently long trip,
+and exhibit narration begins only after Nav2 succeeds within the configured
+arrival tolerance. Merely mentioning or asking about a station does not move
+the robot; the request must contain an explicit movement instruction. A new
+goal is rejected while another goal is active. The navigation banner provides
+Pause, Resume, and Cancel controls, while the voice card provides a local
+**Stop speaking** control. Movement requests remain unavailable until map,
+scan, TF, and localization health are all ready and E-stop is clear.
+
+The map dock remains separate from the exhibit order. Capture it with the
+waypoint editor, then use the confirmed **Return to Dock** button under SahaBot
+Settings -> Operator Controls. The button is disabled when the active map has
+no `maps/waypoint_sets/<map_id>/dock.yaml`. The robot does not automatically
+return to dock after the final exhibit.
+
+Deepgram speech audio is cached under `~/.cache/sahabot/tts` using the provider,
+voice, normalized text, language, and format as the cache identity. Changing
+the Deepgram voice in SahaBot Settings selects a different cache namespace, so
+audio from the previous voice is not replayed. The kiosk browser remembers the
+selected voice and reapplies it when the app reconnects. The default cache
+limit is 512 MB and can be changed with `TTS_CACHE_MAX_MB`.
+
 ### Preferred routes and doorway approaches
 
 Waypoint sets may contain a sparse graph of human-approved `segments`. Each

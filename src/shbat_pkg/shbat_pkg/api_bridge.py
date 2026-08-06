@@ -35,7 +35,18 @@ from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Bool, String
 from action_msgs.msg import GoalStatus
 from sahabat_interfaces.msg import OperatorStatus
-from sahabat_interfaces.srv import ControlLease, GetWaypoints, PatrolCommand
+from sahabat_interfaces.srv import (
+    ControlLease,
+    GetWaypoints,
+    ListWaypointSets,
+    PatrolCommand,
+)
+
+from shbat_pkg.tour_session import (
+    DOCK_WAYPOINT_ID,
+    TourConfigurationError,
+    TourSession,
+)
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -45,6 +56,7 @@ import math
 import json
 import yaml
 import os
+import time
 from dataclasses import dataclass, asdict
 from typing import List, Optional, Dict, Any
 from enum import Enum
@@ -80,6 +92,10 @@ class RobotStatus:
     is_stuck: bool = False
     stuck_duration: float = 0.0
     error_message: str = ""
+    localization_healthy: bool = False
+    map_healthy: bool = False
+    scan_healthy: bool = False
+    tf_healthy: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -130,8 +146,38 @@ class APIBridgeNode(Node):
             '/operator/patrol',
             callback_group=self.callback_group,
         )
+        self.operator_waypoint_sets_client = self.create_client(
+            ListWaypointSets,
+            '/operator/waypoint_sets/list',
+            callback_group=self.callback_group,
+        )
         self.operator_active_map = ''
-        self.operator_command_lock = threading.Lock()
+        self.operator_command_lock = threading.RLock()
+        self.tour_lock = threading.RLock()
+        self.navigation_state_condition = threading.Condition(self.tour_lock)
+        self.catalog_refreshed_at = 0.0
+        self.declare_parameter(
+            'tour_profile', os.environ.get('SAHABOT_TOUR_PROFILE', 'auto')
+        )
+        self.declare_parameter('tour_arrival_tolerance_m', 0.5)
+        self.declare_parameter('tour_almost_there_min_trip_m', 6.0)
+        self.declare_parameter('tour_almost_there_distance_m', 2.5)
+        self.declare_parameter('tour_almost_there_min_time_s', 8.0)
+        self.tour = TourSession(
+            profile=str(self.get_parameter('tour_profile').value),
+            arrival_tolerance_m=float(
+                self.get_parameter('tour_arrival_tolerance_m').value
+            ),
+            almost_there_min_trip_m=float(
+                self.get_parameter('tour_almost_there_min_trip_m').value
+            ),
+            almost_there_distance_m=float(
+                self.get_parameter('tour_almost_there_distance_m').value
+            ),
+            almost_there_min_time_s=float(
+                self.get_parameter('tour_almost_there_min_time_s').value
+            ),
+        )
 
         estop_qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -242,8 +288,18 @@ class APIBridgeNode(Node):
         self.status.angular_velocity = msg.angular_velocity
         self.status.battery_percentage = msg.battery_percentage
         self.status.emergency_stop_active = msg.emergency_stop
+        self.status.localization_healthy = msg.localization_healthy
+        self.status.map_healthy = msg.map_healthy
+        self.status.scan_healthy = msg.scan_healthy
+        self.status.tf_healthy = msg.tf_healthy
         if msg.navigation_state:
             self.status.nav_state = msg.navigation_state
+        with self.navigation_state_condition:
+            self.tour.update_pose(
+                msg.pose.x, msg.pose.y, msg.pose.theta
+            )
+            self.tour.observe_navigation_state(msg.navigation_state)
+            self.navigation_state_condition.notify_all()
 
     @staticmethod
     def _call_service(client, request, timeout: float = 3.0):
@@ -286,51 +342,142 @@ class APIBridgeNode(Node):
             raise RuntimeError(response.message or 'No active waypoint set')
         return map_id, response
 
-    def list_operator_waypoints(self):
-        """Return enabled named waypoints from the active editor set."""
-        map_id, response = self.get_operator_waypoints()
+    def get_operator_dock(self, map_id: str):
+        """Return the optional map-scoped dock through operator_backend."""
+        request = ListWaypointSets.Request()
+        request.map_id = map_id
+        response = self._call_service(
+            self.operator_waypoint_sets_client, request
+        )
+        if not response.has_dock:
+            return None
         return {
-            'map_id': map_id,
-            'set_id': response.set_id,
+            'id': response.dock.id or 'dock',
+            'name': 'dock',
+            'x': response.dock.pose.x,
+            'y': response.dock.pose.y,
+            'yaw': response.dock.pose.theta,
+        }
+
+    @staticmethod
+    def _waypoint_dict(waypoint):
+        return {
+            'id': waypoint.id,
+            'name': waypoint.name,
+            'x': waypoint.pose.x,
+            'y': waypoint.pose.y,
+            'yaw': waypoint.pose.theta,
+            'enabled': waypoint.enabled,
+        }
+
+    def refresh_tour_catalog(self):
+        """Resolve the active map/set into the logical SahaBot catalog."""
+        map_id, response = self.get_operator_waypoints()
+        dock = self.get_operator_dock(map_id)
+        waypoint_data = [
+            self._waypoint_dict(waypoint)
+            for waypoint in response.waypoints
+        ]
+        with self.tour_lock:
+            self.tour.configure(
+                map_id, response.set_id, waypoint_data, dock=dock
+            )
+            self.catalog_refreshed_at = time.monotonic()
+            return self.tour.status_dict(), waypoint_data
+
+    def list_operator_waypoints(self):
+        """Return the map-aware logical catalog plus legacy waypoint data."""
+        tour_status, waypoints = self.refresh_tour_catalog()
+        return {
+            **tour_status,
             'waypoints': [
-                {
-                    'id': waypoint.id,
-                    'name': waypoint.name,
-                    'enabled': waypoint.enabled,
-                }
-                for waypoint in response.waypoints
-                if waypoint.enabled
+                item for item in waypoints if item['enabled']
             ],
         }
 
+    def _wait_for_goal_decision(self, event_id: int, timeout: float = 2.5):
+        """Wait in the Flask worker for operator/Nav2 goal acceptance."""
+        deadline = time.monotonic() + timeout
+        with self.navigation_state_condition:
+            while time.monotonic() < deadline:
+                if self.tour.state in ('navigating', 'blocked'):
+                    event = self.tour.latest_event
+                    if event and event['id'] > event_id:
+                        return dict(event)
+                    return None
+                if self.tour.state == 'failed':
+                    raise RuntimeError('Navigation goal was rejected')
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self.navigation_state_condition.wait(min(0.1, remaining))
+        return None
+
     def operator_patrol_command(
-        self, command: int, waypoint_name: str = ''
+        self,
+        command: int,
+        waypoint_name: str = '',
+        *,
+        touring: Optional[bool] = None,
+        resumed: bool = False,
     ):
         """Send a named command through operator_backend's lease boundary."""
         with self.operator_command_lock:
             set_id = ''
             waypoint_id = ''
+            previous_event_id = 0
             if command == PatrolCommand.Request.NAVIGATE:
-                _map_id, waypoints = self.get_operator_waypoints()
-                selected = next(
-                    (
-                        waypoint for waypoint in waypoints.waypoints
-                        if waypoint.enabled
-                        and waypoint_name in (waypoint.name, waypoint.id)
-                    ),
-                    None,
-                )
-                if selected is None:
-                    available = ', '.join(
-                        waypoint.name for waypoint in waypoints.waypoints
-                        if waypoint.enabled
-                    )
+                unhealthy = []
+                if self.status.emergency_stop_active:
+                    unhealthy.append('emergency stop is active')
+                for label, healthy in (
+                    ('localization', self.status.localization_healthy),
+                    ('map', self.status.map_healthy),
+                    ('laser scan', self.status.scan_healthy),
+                    ('transform tree', self.status.tf_healthy),
+                ):
+                    if not healthy:
+                        unhealthy.append(f'{label} is not healthy')
+                if unhealthy:
                     raise ValueError(
-                        f'Waypoint {waypoint_name!r} not found in active set '
-                        f'{waypoints.set_id!r}; available: {available or "none"}'
+                        'Navigation is unavailable: ' + ', '.join(unhealthy)
                     )
-                set_id = waypoints.set_id
-                waypoint_id = selected.id
+                self.refresh_tour_catalog()
+                with self.tour_lock:
+                    if (
+                        self.tour.target is not None
+                        and self.tour.state in (
+                            'goal_pending', 'navigating', 'blocked'
+                        )
+                    ):
+                        raise ValueError(
+                            'Navigation is already active; pause or cancel it first'
+                        )
+                    try:
+                        target = (
+                            self.tour.resolve_dock()
+                            if waypoint_name == DOCK_WAYPOINT_ID
+                            else self.tour.resolve_station(waypoint_name)
+                        )
+                    except TourConfigurationError as error:
+                        raise ValueError(str(error)) from error
+                    previous_event_id = (
+                        self.tour.latest_event['id']
+                        if self.tour.latest_event else 0
+                    )
+                    self.tour.prepare_navigation(
+                        target,
+                        touring=touring,
+                        resumed=resumed,
+                    )
+                    set_id = self.tour.set_id if not target.is_dock else ''
+                    waypoint_id = target.waypoint_id
+            elif command == PatrolCommand.Request.PAUSE:
+                with self.tour_lock:
+                    if self.tour.target is None or self.tour.state not in (
+                        'goal_pending', 'navigating', 'blocked'
+                    ):
+                        raise ValueError('There is no active navigation to pause')
 
             lease_request = ControlLease.Request()
             lease_request.action = ControlLease.Request.ACQUIRE
@@ -352,10 +499,30 @@ class APIBridgeNode(Node):
                     self.operator_patrol_client, patrol_request
                 )
                 if not result.success:
+                    with self.tour_lock:
+                        self.tour.mark_failed(result.message)
                     raise RuntimeError(
                         result.message or 'Operator command rejected'
                     )
-                return {'success': True, 'message': result.message}
+                interaction = None
+                if command == PatrolCommand.Request.NAVIGATE:
+                    interaction = self._wait_for_goal_decision(
+                        previous_event_id
+                    )
+                elif command == PatrolCommand.Request.PAUSE:
+                    with self.tour_lock:
+                        interaction = self.tour.mark_paused()
+                elif command == PatrolCommand.Request.STOP:
+                    with self.tour_lock:
+                        interaction = self.tour.mark_cancelled()
+                with self.tour_lock:
+                    tour_status = self.tour.status_dict()
+                return {
+                    'success': True,
+                    'message': result.message,
+                    'interaction': interaction,
+                    'tour': tour_status,
+                }
             finally:
                 release = ControlLease.Request()
                 release.action = ControlLease.Request.RELEASE
@@ -367,6 +534,82 @@ class APIBridgeNode(Node):
                     )
                 except RuntimeError as error:
                     self.get_logger().warn(str(error))
+
+    def navigate_next(self, *, start_tour: bool = False):
+        """Navigate to the next available exhibit and then wait there."""
+        self.refresh_tour_catalog()
+        with self.tour_lock:
+            station_id = self.tour.next_station_id()
+            if station_id is None:
+                interaction = self.tour.mark_tour_complete()
+                return {
+                    'success': True,
+                    'complete': True,
+                    'message': interaction['text'],
+                    'interaction': interaction,
+                    'tour': self.tour.status_dict(),
+                }
+        return self.operator_patrol_command(
+            PatrolCommand.Request.NAVIGATE,
+            station_id,
+            touring=True if start_tour else None,
+        )
+
+    def resume_tour_navigation(self):
+        """Resume only the interrupted target, never the whole waypoint set."""
+        with self.tour_lock:
+            if self.tour.target is None or self.tour.state != 'paused':
+                raise ValueError('There is no paused exhibit target')
+            waypoint_name = (
+                DOCK_WAYPOINT_ID
+                if self.tour.target.is_dock
+                else self.tour.target.station_id
+            )
+            touring = self.tour.touring
+        return self.operator_patrol_command(
+            PatrolCommand.Request.NAVIGATE,
+            waypoint_name,
+            touring=touring,
+            resumed=True,
+        )
+
+    def tour_status(self, refresh: bool = True):
+        """Return tour state merged with live pose, health, and battery data."""
+        if refresh and time.monotonic() - self.catalog_refreshed_at > 2.0:
+            try:
+                self.refresh_tour_catalog()
+            except RuntimeError as error:
+                self.status.error_message = str(error)
+        base = self.get_status()
+        with self.tour_lock:
+            self.tour.update_pose(
+                base['position_x'],
+                base['position_y'],
+                base['orientation_yaw'],
+            )
+            self.tour.tick(is_stuck=base['is_stuck'])
+            tour = self.tour.status_dict()
+            if not base['localization_healthy']:
+                tour['location_text'] = (
+                    'My current gallery location is not available until '
+                    'localization is ready.'
+                )
+        return {
+            **tour,
+            'robot_position': {
+                'x': base['position_x'],
+                'y': base['position_y'],
+                'yaw': base['orientation_yaw'],
+            },
+            'battery_level': base['battery_percentage'],
+            'is_obstructed': base['is_stuck'],
+            'emergency_stop_active': base['emergency_stop_active'],
+            'localization_healthy': base['localization_healthy'],
+            'map_healthy': base['map_healthy'],
+            'scan_healthy': base['scan_healthy'],
+            'tf_healthy': base['tf_healthy'],
+            'error_message': base['error_message'],
+        }
     
     def status_check_callback(self):
         """Check for stuck condition and publish status"""
@@ -392,6 +635,15 @@ class APIBridgeNode(Node):
         else:
             self.status.stuck_duration = 0.0
             self.status.is_stuck = False
+            self.stuck_check_time = self.get_clock().now()
+
+        with self.tour_lock:
+            self.tour.update_pose(
+                self.status.position_x,
+                self.status.position_y,
+                self.status.orientation_yaw,
+            )
+            self.tour.tick(is_stuck=self.status.is_stuck)
         
         self.last_pose_x = self.status.position_x
         self.last_pose_y = self.status.position_y
@@ -635,29 +887,10 @@ def create_flask_app() -> Flask:
 
     @app.route('/exhibit/status', methods=['GET'])
     def exhibit_status():
-        """Return the status shape expected by Ainmimdal's May client."""
+        """Return the live map-aware SahaBot tour status."""
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
-        status = ros_node.get_status()
-        return jsonify({
-            'state': status['nav_state'],
-            'current_exhibit': '',
-            'target_exhibit': '',
-            'is_touring': status['nav_state'] == NavState.PATROLLING.value,
-            'tour_progress': (
-                f"{status['current_waypoint_index']}/"
-                f"{status['total_waypoints']}"
-            ),
-            'robot_position': {
-                'x': status['position_x'],
-                'y': status['position_y'],
-                'yaw': status['orientation_yaw'],
-            },
-            'battery_level': status['battery_percentage'],
-            'is_obstructed': status['is_stuck'],
-            'emergency_stop_active': status['emergency_stop_active'],
-            'error_message': status['error_message'],
-        })
+        return jsonify(ros_node.tour_status())
 
     @app.route('/exhibit/goto', methods=['POST'])
     def exhibit_goto():
@@ -679,12 +912,47 @@ def create_flask_app() -> Flask:
             result = ros_node.operator_patrol_command(
                 PatrolCommand.Request.NAVIGATE,
                 exhibit.strip(),
+                touring=False,
             )
             return jsonify({
                 **result,
                 'action': 'goto',
                 'exhibit': exhibit.strip(),
             })
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 404
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/next', methods=['POST'])
+    def exhibit_next():
+        """Navigate to the next configured exhibit without wrapping."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        try:
+            return jsonify(ros_node.navigate_next())
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 404
+        except RuntimeError as error:
+            return jsonify({'success': False, 'error': str(error)}), 503
+
+    @app.route('/exhibit/dock', methods=['POST'])
+    def exhibit_dock():
+        """Return to the map dock after explicit operator confirmation."""
+        if ros_node is None:
+            return jsonify({'error': 'ROS node not initialized'}), 503
+        data = request.get_json(silent=True) or {}
+        if data.get('confirm') is not True:
+            return jsonify({
+                'success': False,
+                'error': 'Operator confirmation is required',
+            }), 400
+        try:
+            return jsonify(ros_node.operator_patrol_command(
+                PatrolCommand.Request.NAVIGATE,
+                DOCK_WAYPOINT_ID,
+                touring=False,
+            ))
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 404
         except RuntimeError as error:
@@ -711,30 +979,32 @@ def create_flask_app() -> Flask:
             return jsonify(ros_node.operator_patrol_command(
                 PatrolCommand.Request.PAUSE
             ))
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 409
         except RuntimeError as error:
             return jsonify({'success': False, 'error': str(error)}), 503
 
     @app.route('/exhibit/resume', methods=['POST'])
     def exhibit_resume():
-        """Resume the active set through the operator safety boundary."""
+        """Resume only the paused exhibit destination."""
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
         try:
-            return jsonify(ros_node.operator_patrol_command(
-                PatrolCommand.Request.RESUME
-            ))
+            return jsonify(ros_node.resume_tour_navigation())
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 409
         except RuntimeError as error:
             return jsonify({'success': False, 'error': str(error)}), 503
 
     @app.route('/exhibit/start_tour', methods=['POST'])
     def exhibit_start_tour():
-        """Start the active editor waypoint set once."""
+        """Start at the first available exhibit, then wait for Next."""
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
         try:
-            return jsonify(ros_node.operator_patrol_command(
-                PatrolCommand.Request.START
-            ))
+            return jsonify(ros_node.navigate_next(start_tour=True))
+        except ValueError as error:
+            return jsonify({'success': False, 'error': str(error)}), 404
         except RuntimeError as error:
             return jsonify({'success': False, 'error': str(error)}), 503
     
@@ -863,7 +1133,7 @@ def main(args=None):
     app = create_flask_app()
     
     # Get host/port from parameters or environment
-    host = os.environ.get('API_HOST', '0.0.0.0')
+    host = os.environ.get('API_HOST', '127.0.0.1')
     port = int(os.environ.get('API_PORT', '5000'))
 
     ros_node.get_logger().info(f'Starting API server on http://{host}:{port}')

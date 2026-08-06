@@ -33,6 +33,15 @@
   model code 2110, firmware 1.32, serial 2527. Remaining capacity still needs
   initialization after a confirmed full charge; the meter currently reports
   0.000 Ah remaining against its configured 20.0 Ah capacity.
+- The first map-aware SahaBot tour layer resolves `station-1` through
+  `station-6` to `waypoint_1` through `waypoint_6` in the active per-map set.
+  `gallerysq4` is strict in the automatic profile; incomplete maps such as
+  `rdlsabtu/tests` run as visibly labelled test profiles. The robot waits at a
+  confirmed exhibit until an explicit Next or destination command.
+- SahaBot navigation speech is driven by accepted, progress, blocked, and
+  completed mission events. Exhibit narration is gated on confirmed arrival.
+  Deepgram MP3 audio is cached per voice under `~/.cache/sahabot/tts`, and the
+  app exposes map-aware availability plus an operator-only dock control.
 
 ## ✅ Current Working Setup
 
@@ -305,7 +314,7 @@ ls /dev/input/js*
 - [x] ~~Fix Xbox 360 joystick mapping~~
 - [ ] Make xpad kernel module persistent across reboots
 - [ ] Fix HWT901B CH340 port lock after shutdown
-- [ ] Add voice/audio feedback for tour guide functionality
+- [x] ~~Add first-version event-driven voice/audio feedback for tour guide functionality~~
 - [ ] Test full patrol workflow in production environment
 - [ ] Remote visualization solution for gallery deployment (Foxglove/VNC)
 - [x] ~~JUNCTEK KG110F ROS and desktop battery monitoring integration~~
