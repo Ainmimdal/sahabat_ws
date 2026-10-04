@@ -7,7 +7,6 @@ the matching to :mod:`shbat_pkg.scan_matcher`.
 
 from __future__ import annotations
 
-import math
 from typing import Optional, Tuple
 
 from nav_msgs.msg import OccupancyGrid
@@ -29,13 +28,10 @@ from shbat_pkg.scan_matcher import (
     accept,
     evaluate,
     occupancy_from_message,
+    planar_rotation,
     scan_to_points,
     search,
 )
-
-
-def _yaw_from_quaternion(q) -> float:
-    return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
 class ScanLocalizationSupport:
@@ -111,10 +107,13 @@ class ScanLocalizationSupport:
         except TransformException:
             return None
         t = transform.transform
-        return t.translation.x, t.translation.y, _yaw_from_quaternion(t.rotation)
+        q = t.rotation
+        # Full rotation, not yaw: the lidar is mounted upside down
+        # (lidar_joint rpy 3.14 0 3.14) and a yaw-only projection mirrors it.
+        return t.translation.x, t.translation.y, planar_rotation(q.x, q.y, q.z, q.w)
 
     def _points(self):
-        sensor = self._sensor_pose()
+        sensor_x, sensor_y, rotation = self._sensor_pose()
         scan = self.scan
         return scan_to_points(
             scan.ranges,
@@ -122,7 +121,9 @@ class ScanLocalizationSupport:
             scan.angle_increment,
             scan.range_min,
             scan.range_max,
-            *sensor,
+            sensor_x,
+            sensor_y,
+            sensor_rotation=rotation,
         )
 
     def confirm(
