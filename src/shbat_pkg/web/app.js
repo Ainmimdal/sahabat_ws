@@ -130,12 +130,16 @@ function connect() {
     applyMode(); renderHeader(); renderMapping();
   });
   on('mode', (d) => { S.mode = d; applyMode(); renderPanels(); });
-  on('camera', (d) => { S.camera = d; renderCamera(); });
+  on('camera', (d) => { S.camera = d; renderCamera(); throttledPanels(); });
 }
 
 setInterval(() => {
   if (iHaveControl()) safe(cmd('heartbeat', {}, true));
 }, 1000);
+let panelsAt = 0;
+function throttledPanels() {
+  if (Date.now() - panelsAt > 1000) { panelsAt = Date.now(); renderPanels(); }
+}
 
 // ------------------------------------------------------------------ header
 function chip(el, text, cls) {
@@ -886,6 +890,11 @@ function renderPanels() {
     ['TF', ...yes(st.tf_ok)],
     ['Control owner', st.control_owner || 'nobody'],
     ['Pose', pose],
+    ...(S.camera ? [
+      ['Lidar rate', `${S.camera.lidar_hz.toFixed(1)} Hz`],
+      ['ZED rate', `${S.camera.zed_hz.toFixed(1)} fps`],
+      ['AprilTag detector', `${S.camera.detector_hz.toFixed(1)} Hz`, S.camera.detector_hz >= 8 ? 'ok' : S.camera.detector_hz > 0 ? 'bad' : ''],
+    ] : []),
   ]);
   $('joy').classList.toggle('disabled', !iHaveControl() || st.emergency_stop);
 }
@@ -1273,7 +1282,11 @@ function renderCamera() {
   const stats = $('cam-stats');
   stats.innerHTML = '';
   const part = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; stats.append(s); };
-  part(cam.dataset.on === '1' ? `camera ${d.live ? d.camera_hz.toFixed(1) : '0'} fps · ` : 'camera off · ');
+  // ZED = true camera publish rate (camera_info); showing = frames this
+  // browser view receives; detector = AprilTag detections per second.
+  part(`ZED ${d.zed_hz.toFixed(1)} fps`, d.zed_hz > 0 ? '' : 'bad');
+  part(cam.dataset.on === '1' ? ` · showing ${d.live ? d.camera_hz.toFixed(1) : '0'} fps` : '');
+  part(' · ');
   part(`detector ${det.toFixed(1)} Hz`, det >= 8 ? 'ok' : det > 0 ? 'bad' : '');
   part(det > 0 && det < 8 ? ' (target ≥ 8)' : '');
   part(` · ${d.tags.length} tag${d.tags.length === 1 ? '' : 's'}`);

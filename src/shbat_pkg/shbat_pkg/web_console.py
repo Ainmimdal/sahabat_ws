@@ -66,7 +66,7 @@ from sahabat_interfaces.srv import (
     SetEmergencyStop,
     SetMode,
 )
-from sensor_msgs.msg import CompressedImage, LaserScan
+from sensor_msgs.msg import CameraInfo, CompressedImage, LaserScan
 from slam_toolbox.srv import SaveMap as SlamSaveMap
 from slam_toolbox.srv import SerializePoseGraph
 from std_msgs.msg import String
@@ -247,8 +247,9 @@ class CameraFeed:
 
     SAVER_PERIOD = 0.2
 
-    def __init__(self, node: Node, topic: str, publish):
+    def __init__(self, node: Node, topic: str, publish, lidar_hz=lambda: 0.0):
         self.node = node
+        self.lidar_hz = lidar_hz
         self.topic = topic
         self.publish = publish
         self.cond = threading.Condition()
@@ -264,8 +265,10 @@ class CameraFeed:
         self.size = (0, 0)
         self.frames = 0
         self.detections_count = 0
+        self.info_count = 0
         self.camera_hz = 0.0
         self.detector_hz = 0.0
+        self.zed_hz = 0.0
         self.rate_started = time.monotonic()
         self.tags = []
         self.tags_at = 0.0
@@ -273,6 +276,11 @@ class CameraFeed:
         node.create_subscription(
             AprilTagDetectionArray, '/apriltag/detections',
             self._detections, qos_profile_sensor_data)
+        # camera_info is small and published once per ZED frame, so it gives
+        # the camera's true rate independent of what this node can receive.
+        info_topic = topic.split('/image_rect_color')[0] + '/camera_info'
+        node.create_subscription(
+            CameraInfo, info_topic, self._camera_info, qos_profile_sensor_data)
         node.create_timer(0.2, self._tick)
         threading.Thread(target=self._saver_loop, daemon=True).start()
 
@@ -285,6 +293,9 @@ class CameraFeed:
             'margin': round(d.decision_margin, 1),
         } for d in message.detections]
         self.tags_at = time.monotonic()
+
+    def _camera_info(self, _message) -> None:
+        self.info_count += 1
 
     def _image(self, message: CompressedImage) -> None:
         data = bytes(message.data)
@@ -303,8 +314,10 @@ class CameraFeed:
         if elapsed >= 2.0:
             self.camera_hz = self.frames / elapsed if self.subscription else 0.0
             self.detector_hz = self.detections_count / elapsed
+            self.zed_hz = self.info_count / elapsed
             self.frames = 0
             self.detections_count = 0
+            self.info_count = 0
             self.rate_started = now
         fresh = now - self.tags_at < 0.6
         self.publish('camera', {
@@ -312,6 +325,8 @@ class CameraFeed:
             'height': self.size[1],
             'camera_hz': round(self.camera_hz, 1),
             'detector_hz': round(self.detector_hz, 1),
+            'zed_hz': round(self.zed_hz, 1),
+            'lidar_hz': round(self.lidar_hz(), 1),
             'tags': self.tags if fresh else [],
             'live': bool(self.subscription) and now - self.jpeg_at < 2.0,
         })
@@ -435,6 +450,9 @@ class WebConsole(Node):
         self.latest_map = None
         self.map_version = 0
         self.last_scan_sent = 0.0
+        self.scan_count = 0
+        self.scan_rate_started = time.monotonic()
+        self.lidar_hz = 0.0
         self.last_plan_sent = 0.0
         self.scan_period = 1.0 / max(0.5, float(self.get_parameter('scan_rate').value))
 
@@ -507,7 +525,9 @@ class WebConsole(Node):
 
         self.camera = CameraFeed(
             self, str(self.get_parameter('camera_topic').value),
-            lambda event, payload: self.hub.publish(event, payload))
+            lambda event, payload: self.hub.publish(event, payload),
+            lambda: self.lidar_hz
+            if time.monotonic() - self.scan_rate_started < 4.0 else 0.0)
 
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)).expanduser()
@@ -573,6 +593,11 @@ class WebConsole(Node):
 
     def _scan(self, message: LaserScan) -> None:
         now = time.monotonic()
+        self.scan_count += 1
+        if now - self.scan_rate_started >= 2.0:
+            self.lidar_hz = self.scan_count / (now - self.scan_rate_started)
+            self.scan_count = 0
+            self.scan_rate_started = now
         if now - self.last_scan_sent < self.scan_period or not self.hub.clients:
             return
         self.last_scan_sent = now

@@ -264,7 +264,9 @@ Shared behaviour:
   (**Smooth**: full camera rate, about 14 fps and 2.7 MB/s; no decode or
   encode on the robot). **Data saver** re-encodes at half resolution, 5 fps,
   under 100 KB/s. The browser draws the `/apriltag/detections` outlines (tag ID,
-  decision margin) and shows camera fps and **detector Hz**; the detector
+  decision margin) and shows the true ZED rate (from `camera_info`), the rate
+  this view receives, and **detector Hz**; the System tab also lists the lidar
+  rate. The detector
   target is at least 8 Hz. The image is subscribed only while someone views it.
   Raw `image_rect_color` (3.7 MB per frame) is too heavy for a Python
   subscriber on the loaded Jetson and only reached 3–5 fps.
