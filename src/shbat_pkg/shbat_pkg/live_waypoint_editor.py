@@ -54,6 +54,21 @@ def _select_map_id(maps_directory: Path, requested: str) -> str:
     raise RuntimeError(f'No map YAML found in {maps_directory}')
 
 
+def _lan_addresses():
+    """IPv4 addresses a browser could use to reach this robot."""
+    try:
+        output = subprocess.run(
+            ['hostname', '-I'], capture_output=True, text=True, timeout=2.0
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        output = ''
+    addresses = [
+        item for item in output.split()
+        if '.' in item and not item.startswith(('127.', '172.17.'))
+    ]
+    return addresses or ['<robot-ip>']
+
+
 def _terminate(processes):
     for process in processes:
         if process.poll() is None:
@@ -188,11 +203,9 @@ def main(argv=None):
         if args.use_web:
             # Not in ``processes``: a web console failure must not stop the robot stack.
             optional.append(subprocess.Popen(web_cmd))
-            print(
-                f'Web console: http://<robot-ip>:{args.web_port}/ '
-                '(no authentication; trusted network only)',
-                flush=True,
-            )
+            for address in _lan_addresses():
+                print(f'Web console: http://{address}:{args.web_port}/', flush=True)
+            print('Web console has no authentication; trusted network only.', flush=True)
         time.sleep(max(0.0, args.startup_delay))
         for process in processes:
             if process.poll() is not None:
