@@ -392,6 +392,13 @@ ros2 topic pub /emergency_stop std_msgs/msg/Bool "{data: false}" --once
 The API endpoint activates the latch when called with an empty body. Clear it
 explicitly with `{"active": false}`.
 
+Activating the E-stop first quick-stops both wheels (10 ms ramp), then after
+0.5 s `base_controller` disables the motors so the wheels turn freely and the
+robot can be pushed by hand. On a slope the robot can therefore roll once the
+motors are released. Clearing the E-stop writes a zero target and re-enables
+the motors before any new command is accepted. Set the `base_controller`
+parameter `disable_motors_on_estop:=false` to keep the wheels held instead.
+
 ## Pre-motion checks
 
 ```bash

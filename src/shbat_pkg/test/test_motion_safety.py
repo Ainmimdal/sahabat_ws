@@ -319,3 +319,103 @@ def test_goal_pose_recovery_is_bounded_and_stationary():
     follow_path = root.find('.//FollowPath')
     assert follow_path is not None
     assert follow_path.attrib['controller_id'] == 'FollowPath'
+
+
+class _EstopDriver:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def set_rpm(self, _left, _right):
+        self.calls.append('zero_target')
+        return object()
+
+    def emergency_stop(self):
+        self.calls.append('quick_stop')
+        return object()
+
+    def disable_motor(self):
+        self.calls.append('disable')
+        return object()
+
+    def clear_alarm(self):
+        self.calls.append('clear_quick_stop')
+        return object()
+
+    def enable_motor(self):
+        self.calls.append('enable')
+        return object()
+
+
+def _estop_controller(calls, disable_on_estop=True):
+    timers = []
+
+    class Clock:
+        def now(self):
+            return 'now'
+
+    logger = _FakeLogger()
+    controller = SimpleNamespace(
+        driver=_EstopDriver(calls),
+        emergency_stopped=False,
+        target_linear_vel=0.3,
+        target_angular_vel=0.2,
+        disable_motors_on_estop=disable_on_estop,
+        estop_disable_delay=0.5,
+        _estop_disable_timer=None,
+        get_logger=lambda: logger,
+        get_clock=lambda: Clock(),
+        _require_modbus_success=BaseController._require_modbus_success,
+    )
+    controller.stop_motors = lambda: BaseController.stop_motors(controller)
+    controller._disable_motors_after_estop = (
+        lambda: BaseController._disable_motors_after_estop(controller)
+    )
+
+    def create_timer(period, callback):
+        timer = SimpleNamespace(period=period, callback=callback)
+        timers.append(timer)
+        return timer
+
+    controller.create_timer = create_timer
+    controller.destroy_timer = lambda timer: calls.append('destroy_timer')
+    return controller, timers
+
+
+def test_estop_quick_stops_first_then_releases_motors():
+    calls = []
+    controller, timers = _estop_controller(calls)
+
+    BaseController.emergency_stop_callback(controller, SimpleNamespace(data=True))
+    # Torque stays on until the quick stop has had time to halt the robot.
+    assert calls == ['zero_target', 'quick_stop']
+    assert len(timers) == 1 and timers[0].period == 0.5
+
+    timers[0].callback()
+    assert calls[-2:] == ['destroy_timer', 'disable']
+
+    BaseController.emergency_stop_callback(controller, SimpleNamespace(data=False))
+    assert calls[-3:] == ['zero_target', 'clear_quick_stop', 'enable']
+    assert controller.emergency_stopped is False
+
+
+def test_estop_cleared_before_release_cancels_pending_disable():
+    calls = []
+    controller, timers = _estop_controller(calls)
+
+    BaseController.emergency_stop_callback(controller, SimpleNamespace(data=True))
+    BaseController.emergency_stop_callback(controller, SimpleNamespace(data=False))
+
+    assert 'destroy_timer' in calls
+    assert 'disable' not in calls
+    assert controller._estop_disable_timer is None
+    assert calls[-1] == 'enable'
+
+
+def test_estop_release_can_be_turned_off():
+    calls = []
+    controller, timers = _estop_controller(calls, disable_on_estop=False)
+
+    BaseController.emergency_stop_callback(controller, SimpleNamespace(data=True))
+
+    assert timers == []
+    assert calls == ['zero_target', 'quick_stop']

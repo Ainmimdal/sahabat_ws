@@ -48,6 +48,10 @@ class BaseController(Node):
         self.declare_parameter('max_angular_vel', 2.0)  # rad/s
         self.declare_parameter('cmd_vel_timeout', 0.5)  # seconds
         self.declare_parameter('odom_rate', 20.0)  # Hz
+        # After the quick stop halts the wheels, release motor torque so the
+        # robot can be pushed by hand while the E-stop is latched.
+        self.declare_parameter('disable_motors_on_estop', True)
+        self.declare_parameter('estop_disable_delay', 0.5)  # seconds
         
         # Get parameters
         self.port = self.get_parameter('port').value
@@ -67,6 +71,13 @@ class BaseController(Node):
         self.max_angular_vel = self.get_parameter('max_angular_vel').value
         self.cmd_vel_timeout = self.get_parameter('cmd_vel_timeout').value
         odom_rate = self.get_parameter('odom_rate').value
+        self.disable_motors_on_estop = self.get_parameter(
+            'disable_motors_on_estop'
+        ).value
+        self.estop_disable_delay = self.get_parameter(
+            'estop_disable_delay'
+        ).value
+        self._estop_disable_timer = None
         
         # Initialize motor driver
         self.driver = None
@@ -274,7 +285,18 @@ class BaseController(Node):
             self.emergency_stopped = True
             self.get_logger().warn('EMERGENCY STOP ACTIVATED - motors stopped!')
             self.stop_motors()
+            if getattr(self, 'disable_motors_on_estop', False):
+                # Disabling immediately would let the robot coast. Release
+                # torque only after the 10 ms quick stop has halted it.
+                self._estop_disable_timer = self.create_timer(
+                    self.estop_disable_delay,
+                    self._disable_motors_after_estop,
+                )
         elif not msg.data and self.emergency_stopped:
+            timer = getattr(self, '_estop_disable_timer', None)
+            if timer is not None:
+                self.destroy_timer(timer)
+                self._estop_disable_timer = None
             try:
                 # Quick stop may retain the previous target registers. Write a
                 # zero target while quick stop is still active so clearing it
@@ -300,6 +322,29 @@ class BaseController(Node):
             self.emergency_stopped = False
             self.get_logger().info('Emergency stop cleared - motors enabled')
     
+    def _disable_motors_after_estop(self):
+        """Release motor torque once the E-stop quick stop has finished."""
+        timer = self._estop_disable_timer
+        self._estop_disable_timer = None
+        if timer is not None:
+            self.destroy_timer(timer)
+        if not self.emergency_stopped or not self.driver:
+            return
+        try:
+            self._require_modbus_success(
+                self.driver.disable_motor(),
+                'disable motors after E-stop',
+            )
+        except Exception as error:
+            # The quick-stop state still holds the wheels at zero.
+            self.get_logger().error(
+                f'Failed to disable motors after E-stop: {error}'
+            )
+            return
+        self.get_logger().warn(
+            'E-stop: motors disabled (wheels free); clear E-stop to re-enable'
+        )
+
     def stop_motors(self):
         """Stop both motors with the dedicated ZLAC quick-stop profile."""
         self.target_linear_vel = 0.0
