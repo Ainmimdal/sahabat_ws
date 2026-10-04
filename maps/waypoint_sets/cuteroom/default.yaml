@@ -1,3 +1,17 @@
 name: Default
-revision: 0
-waypoints: []
+revision: 3
+waypoints:
+- id: eeb4616adf431a8420ee6d69ac87a41d
+  name: waypoint_2
+  x: -0.102
+  y: 0.802
+  yaw: 1.644
+  dwell_seconds: 0.0
+  enabled: true
+- id: 3a7373f8e830b9d73dcfd9d60c2527b3
+  name: waypoint_3
+  x: 0.627
+  y: 3.029
+  yaw: 3.102
+  dwell_seconds: 0.0
+  enabled: true

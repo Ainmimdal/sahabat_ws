@@ -206,3 +206,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Waypoint store lock files (runtime state)
+maps/waypoint_sets/**/.lock
