@@ -81,8 +81,15 @@ class Joy2CmdNode(Node):
 
         # Command the base controller's latched emergency-stop input. Publishing
         # only a zero Twist is not sufficient because Nav2 may publish another
-        # velocity command immediately afterwards.
-        self.estop_pub = self.create_publisher(Bool, 'emergency_stop', 10)
+        # velocity command immediately afterwards. base_controller,
+        # command_arbiter and operator_backend subscribe TRANSIENT_LOCAL; a
+        # VOLATILE publisher is QoS-incompatible and never reaches them.
+        estop_qos = QoSProfile(
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            depth=1,
+        )
+        self.estop_pub = self.create_publisher(Bool, 'emergency_stop', estop_qos)
 
         # Adjustable max speeds
         self.max_linear_speed = float(self.get_parameter('max_linear_speed').value)
