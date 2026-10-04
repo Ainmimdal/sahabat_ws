@@ -1,6 +1,6 @@
 # Sahabat Robot - Project Status
 
-**Last Updated:** August 1, 2026
+**Last Updated:** August 13, 2026
 
 ## Current Implementation Notes (June 29, 2026)
 
@@ -19,13 +19,20 @@
 - Desktop launchers currently include:
   - `Sahabat Waypoint Editor Offline`: offline map/waypoint-set editing.
   - `Sahabat Waypoint Editor Live`: starts live operations plus the RViz
-    waypoint editor as the single RViz window with ZED enabled by default.
-  - `Sahabat New Mapping`: starts `navigation.launch.py mode:=mapping
-    use_zed:=true`.
-- ZED support is enabled with `use_zed:=true` in `slam_nav_launch.py`,
-  `localization_patrol_launch.py`, `navigation.launch.py`, and
-  `operations.launch.py`. The one-click live waypoint editor passes it by
-  default; use `ros2 run shbat_pkg live_waypoint_editor --no-zed` to disable it.
+    waypoint editor as the single RViz window with the ZED AprilTag camera
+    enabled by default.
+  - `Sahabat New Mapping`: starts `navigation.launch.py mode:=mapping`.
+- The ZED 2i is image-only and is used exclusively for AprilTag detection in
+  AMCL localization mode. Its depth and point-cloud output are disabled, and
+  Nav2 uses only `/scan` for live obstacle marking and clearing. Production
+  operations enable the AprilTag camera by default; use `ros2 run shbat_pkg
+  live_waypoint_editor --no-zed` only when intentionally disabling tag
+  detection.
+- Existing maps support fixed AprilTag landmarks through the left-side RViz
+  panel. Stable captures are stored per map and can seed AMCL at startup
+  without moving the robot; once a map has saved tags, the assumed dock pose
+  stands down. The default detector configuration is REEFSCAPE-compatible
+  `36h11`, with a 0.1651 m (6.5 in.) black-square edge.
 - JUNCTEK KG-F battery support publishes `/battery_state`, `/diagnostics`, and
   `/junctek/state`. The KG110F is connected through a QinHeng USB-RS485 adapter
   and receives the stable `/dev/junctek` name from the workspace udev rules.
@@ -50,7 +57,7 @@
 
 | Component | Model | Connection | Port | Baudrate | Status |
 |-----------|-------|------------|------|----------|--------|
-| Motor Controller | ZLAC8015D | RS485/FTDI | `/dev/motor` → ttyUSBx | 115200 | ✅ Working |
+| Motor Controller | ZLAC8015D | RS485/QinHeng USB | `/dev/motor` → ttyACMx | 115200 | ✅ Modbus reads working |
 | LIDAR | RPLIDAR S2 | FTDI (custom) | `/dev/ttyUSBx` (auto-probed) | 1,000,000 | ✅ Working (10 Hz, DenseBoost) |
 | IMU | HWT901B (WITMotion) | CH340/CP2102 | `/dev/ttyUSBx` (auto-probed) | 115200 | ✅ Working (USB power-dependent) |
 | Camera | ZED 2i | USB 3.0 | Direct | - | ✅ Working |
@@ -59,7 +66,7 @@
 **Important Notes:**
 - **RPLIDAR S2**: Mounted upside-down, 7cm forward of wheel axle. Connected via custom FTDI adapter (original USB cable broken). Needs **direct USB port** (not through hub) for adequate motor power. DenseBoost scan mode at 10 Hz / 32 KHz.
 - **HWT901B IMU**: CH340 USB-to-UART adapter. CH341 kernel module conflicts on Jetson — CP2102 adapter recommended if issues persist. Outputs WITMotion protocol at 115200 baud.
-- **Smart device detection**: All sensors auto-probed at launch — RPLIDAR by scan data at 1Mbaud, HWT901B by continuous data stream, BNO055 by chip ID query, Motor by known FTDI serial (A50285BI). No fixed port assignments needed.
+- **Smart device detection**: All sensors auto-probed at launch — RPLIDAR by scan data at 1Mbaud, HWT901B by continuous data stream, BNO055 by chip ID query, Motor by the stable udev link/known QinHeng serial (5C83118643) with Modbus fallback. No changing `ttyACM`/`ttyUSB` number needs to be configured manually.
 - **Xbox 360 Controller**: Requires `xpad` kernel module (compiled from source for Jetson kernel). Wireless adapter supported.
 - Udev rules at `udev/99-sahabat-robot.rules` (must be installed to `/etc/udev/rules.d/`).
 - **Angular velocity limited to 0.5 rad/s** to prevent scan mismatch during rotation (10Hz LIDAR sync).
@@ -96,7 +103,7 @@
 | AMCL | Localization with saved map | ✅ Working |
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
 | Waypoint Manager | `shbat_pkg/waypoint_manager` | ✅ Working (GUI) |
-| ZED Obstacle Detection | VoxelLayer + PointCloud2 | ✅ Launchable from operations and mapping paths with `use_zed:=true` |
+| ZED AprilTag Detection | Rectified left image + camera info | ✅ Enabled by default for AMCL production localization |
 | Battery Monitor | `shbat_pkg/junctek_battery` | ✅ ROS and desktop live reads working |
 
 ---
@@ -132,13 +139,13 @@
 - RPLIDAR S2: scan data at 1,000,000 baud
 - HWT901B: continuous WITMotion data stream (0x55 headers)
 - BNO055 fallback: UART chip ID query (0xAA 0x01 command)
-- Motor: known FTDI serial (A50285BI) or Modbus probe
+- Motor: known QinHeng serial (5C83118643) or Modbus probe
 - Auto-disables sensors not detected
 
 ### 6. SLAM Toolbox (2D Mapping)
-- **Launch:** `ros2 launch shbat_pkg navigation.launch.py mode:=mapping use_zed:=true`
+- **Launch:** `ros2 launch shbat_pkg navigation.launch.py mode:=mapping`
 - Lightweight 2D SLAM using LIDAR only
-- ZED pointcloud feeds Nav2 VoxelLayer obstacle detection while mapping.
+- The ZED is not started in mapping mode; `/scan` is the obstacle source.
 - Opens the Sahabat Mapping GUI for naming and saving maps
 - Saves navigation maps and editable sessions under `~/sahabat_ws/maps/`
 - Config: `config/slam_toolbox.yaml`
@@ -187,16 +194,15 @@
 - **Enabled via:** `use_foxglove:=true` launch argument
 - Default port: 8765
 
-### 11. ZED 3D Obstacle Detection (VoxelLayer + PointCloud2)
-- **Enabled via:** `use_zed:=true` launch argument in `slam_nav_launch.py`,
-  `localization_patrol_launch.py`, `navigation.launch.py`, or
-  `operations.launch.py`.
-- `slam_nav_launch.py` starts the ZED wrapper as namespace `zed`, node
-  `zed_node`, camera name `zed2i`; the obstacle pointcloud topic is
-  `/zed/zed_node/point_cloud/cloud_registered`.
-- Nav2 costmap configs use VoxelLayer/PointCloud2 for ZED obstacle input. The
-  pointcloud topic is aligned across `nav2_odom_only.yaml`, `nav2_params.yaml`,
-  `nav2_params_mapping.yaml`, and `nav2_params_odom.yaml`.
+### 11. ZED AprilTag Detection (Image Only)
+- `use_zed:=true` enables the ZED only when the launch is running hardware,
+  AMCL saved-map localization, and `use_apriltag:=true`.
+- `slam_nav_launch.py` starts namespace `zed`, node `zed_node`, camera name
+  `zed2i`, with `depth_mode: NONE`. The AprilTag detector consumes the
+  rectified left image and camera calibration.
+- No ZED point cloud is generated or connected to a Nav2 costmap. All shipped
+  Nav2 configurations use filtered LiDAR `/scan` as their sole observation
+  source.
 
 ### 12. Localization + Patrol Launch (Production Ready)
 - **Launch:** `ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/path/to/map`
@@ -253,7 +259,7 @@ ros2 launch shbat_pkg sahabat_launch.py
 # === PRODUCTION: LOCALIZATION + PATROL ===
 ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/gallery
 
-# With ZED obstacle detection
+# ZED AprilTag detection is enabled by default; this is the explicit form
 ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/gallery use_zed:=true
 
 # Full production with known start position
@@ -267,11 +273,12 @@ ros2 launch shbat_pkg localization_patrol_launch.py \
 
 # === LIVE WAYPOINT EDITOR (single RViz window) ===
 # Uses ~/sahabat_ws/maps/last_selected_map and starts operations plus the
-# waypoint editor RViz. ZED is enabled by default; add --no-zed to disable it.
+# waypoint editor RViz. ZED AprilTag detection is enabled by default; add
+# --no-zed to disable tag detection.
 ros2 run shbat_pkg live_waypoint_editor
 
 # === SLAM MAPPING (create new map) ===
-ros2 launch shbat_pkg navigation.launch.py mode:=mapping use_zed:=true
+ros2 launch shbat_pkg navigation.launch.py mode:=mapping
 
 # Enter the map name and press Save Map in the Sahabat Mapping panel.
 # Output is stored under ~/sahabat_ws/maps/ by default.
@@ -320,7 +327,8 @@ ls /dev/input/js*
 - [ ] Remote visualization solution for gallery deployment (Foxglove/VNC)
 - [x] ~~JUNCTEK KG110F ROS and desktop battery monitoring integration~~
 - [ ] Initialize KG110F remaining capacity after a confirmed full charge and verify its temperature input
-- [ ] AprilTag docking for precise exhibit positioning (optional)
+- [x] ~~AprilTag landmark recording and guarded AMCL startup localization~~
+- [ ] Verify AprilTag pose accuracy and ZED camera extrinsics on the physical robot
 
 ---
 
@@ -365,7 +373,9 @@ ls /dev/input/js*
 | `/imu` | Imu | witmotion_node | IMU data (remapped from /witmotion/imu) |
 | `/scan` | LaserScan | scan_filter | Filtered LIDAR |
 | `/scan_raw` | LaserScan | rplidar_node | Raw LIDAR (remapped from /scan) |
-| `/zed/zed_node/point_cloud/cloud_registered` | PointCloud2 | ZED | 3D point cloud for obstacle detection |
+| `/zed/zed_node/left/image_rect_color` | Image | ZED | Rectified left image for AprilTag detection only |
+| `/zed/zed_node/left/camera_info` | CameraInfo | ZED | Camera calibration for AprilTag pose estimation |
+| `/apriltag/detections` | AprilTagDetectionArray | apriltag_ros | Detected tags used by the landmark manager |
 | `/emergency_stop` | Bool | joy2cmd | Emergency stop trigger |
 | `/waypoint_markers` | MarkerArray | waypoint_manager | Waypoint visualization |
 | `/goal_pose` | PoseStamped | RViz | Goal for navigation |

@@ -8,6 +8,8 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AprilTagLandmark.msg"
+  "msg/AprilTagLandmarkArray.msg"
   "msg/MapInfo.msg"
   "msg/OperatorStatus.msg"
   "msg/RouteSegment.msg"
@@ -23,6 +25,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/LocalizationRecovery.srv"
   "srv/LoadMap.srv"
   "srv/ManageWaypointSet.srv"
+  "srv/ManageAprilTagLandmark.srv"
   "srv/PatrolCommand.srv"
   "srv/SaveMap.srv"
   "srv/SaveDock.srv"

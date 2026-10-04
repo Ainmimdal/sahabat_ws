@@ -2,7 +2,8 @@
 set -uo pipefail
 
 readonly APP_DIRECTORY="/home/sahabat/sahabot"
-readonly APP_URL="http://127.0.0.1:8000/?screen=explore&runtime=electron&build=20260806-battery-tour-v1"
+readonly APP_BUILD_ID="$(stat -c %Y "${APP_DIRECTORY}/dist/index.html" 2>/dev/null || date +%s)"
+readonly APP_URL="http://127.0.0.1:8000/?screen=explore&runtime=electron&build=${APP_BUILD_ID}"
 readonly SERVER="${APP_DIRECTORY}/.venv/bin/uvicorn"
 readonly ELECTRON="${APP_DIRECTORY}/node_modules/electron/dist/electron"
 readonly ELECTRON_APP="${APP_DIRECTORY}/electron/main.cjs"

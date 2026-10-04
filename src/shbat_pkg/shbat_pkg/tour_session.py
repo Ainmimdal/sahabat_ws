@@ -334,7 +334,15 @@ class TourSession:
             if self.state != 'blocked' and self.target is not None:
                 self.state = 'navigating'
             return None
-        if raw_state == 'complete' and self.target is not None:
+        # A latched/repeated completion from the previous goal can arrive after
+        # prepare_navigation() has installed the next target but before the
+        # operator reports that goal as accepted.  Never apply that stale
+        # terminal state to a goal which is still pending.
+        if (
+            raw_state == 'complete'
+            and self.target is not None
+            and self.state in ('navigating', 'blocked')
+        ):
             remaining = self._distance_to(self.target)
             self.remaining_distance_m = remaining
             if remaining > self.arrival_tolerance_m:

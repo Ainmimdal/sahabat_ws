@@ -5,8 +5,8 @@ Panels:
     Name: Views
   - Class: shbat_rviz_plugins/Sahabat Navigation Status
     Name: Sahabat Navigation Status
-  - Class: shbat_rviz_plugins/Localization Recovery
-    Name: Localization Recovery
+  - Class: shbat_rviz_plugins/AprilTag Landmarks
+    Name: AprilTag Landmarks
 Visualization Manager:
   Displays:
     - Class: rviz_default_plugins/Grid
@@ -142,24 +142,17 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-    
-    - Class: rviz_default_plugins/PointCloud2
-      Name: ZED PointCloud
-      Value: false
+
+    - Class: rviz_default_plugins/MarkerArray
+      Name: Saved AprilTags
+      Value: true
       Topic:
-        Value: /zed/zed_node/point_cloud/cloud_registered
-        Depth: 5
-        Durability Policy: Volatile
+        Value: /apriltag_landmarks/markers
+        Depth: 1
+        Durability Policy: Transient Local
         History Policy: Keep Last
         Reliability Policy: Reliable
-      Size (m): 0.02
-      Style: Points
-      Color Transformer: RGB8
-      Decay Time: 0
-      Max Color: 255; 255; 255
-      Min Color: 0; 0; 0
-      Position Transformer: XYZ
-        
+
   Global Options:
     Background Color: 48; 48; 48
     Fixed Frame: map
@@ -181,5 +174,7 @@ Visualization Manager:
       X: 0
       Y: 0
 Window Geometry:
+  AprilTag Landmarks:
+    collapsed: false
   Width: 1200
   Height: 800

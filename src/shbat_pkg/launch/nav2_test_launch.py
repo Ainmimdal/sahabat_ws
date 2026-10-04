@@ -43,7 +43,7 @@ import xacro
 # Import USB detection from main launch unless an inspection command requested
 # no hardware probing.
 if os.environ.get('SAHABAT_SKIP_DEVICE_DETECTION') == '1':
-    lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+    lidar_port, imu_port, motor_port = None, None, '/dev/motor'
 else:
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,7 +52,7 @@ else:
         lidar_port, imu_port, motor_port = smart_detect_devices()
     except Exception as e:
         print(f"Warning: Could not import device detection: {e}")
-        lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+        lidar_port, imu_port, motor_port = None, None, '/dev/motor'
 
 
 def generate_launch_description():
@@ -92,7 +92,7 @@ def generate_launch_description():
     
     motor_port_arg = DeclareLaunchArgument(
         'motor_port',
-        default_value=motor_port if motor_port else '/dev/ttyUSB0',
+        default_value=motor_port if motor_port else '/dev/motor',
         description='Motor controller serial port'
     )
     motor_port_cfg = LaunchConfiguration('motor_port')
@@ -148,7 +148,8 @@ def generate_launch_description():
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
-            {'decel_time_ms': 200},
+            {'decel_time_ms': 500},
+            {'quick_stop_decel_time_ms': 10},
             {'max_linear_vel': 0.5},        # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
@@ -172,7 +173,8 @@ def generate_launch_description():
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
-            {'decel_time_ms': 200},
+            {'decel_time_ms': 500},
+            {'quick_stop_decel_time_ms': 10},
             {'max_linear_vel': 0.5},        # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},

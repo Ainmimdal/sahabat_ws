@@ -73,13 +73,12 @@ equivalent physical-robot smoke tests.
   `~/sahabat_ws/maps/waypoint_sets/<map_id>/`.
 - The one-click live waypoint editor is `ros2 run shbat_pkg
   live_waypoint_editor`; it starts operations, `operator_backend`, and one RViz
-  waypoint-editor window. It passes `use_zed:=true` by default; use
-  `--no-zed` only when intentionally disabling ZED.
-- ZED support uses `use_zed:=true` in `slam_nav_launch.py`,
-  `localization_patrol_launch.py`, `navigation.launch.py`, and
-  `operations.launch.py`. The configured wrapper namespace/node is
-  `zed/zed_node`, camera name `zed2i`, and the Nav2 PointCloud2 observation
-  topic is `/zed/zed_node/point_cloud/cloud_registered`.
+  waypoint-editor window. It passes `use_zed:=true` by default for AprilTag
+  detection; use `--no-zed` only when intentionally disabling the tag camera.
+- The ZED is started only for hardware-backed AMCL localization with AprilTag
+  detection enabled. It publishes the rectified left image and camera info
+  needed by `apriltag_ros`; depth is disabled and no ZED point cloud is a Nav2
+  observation source. Filtered LiDAR `/scan` is the sole live obstacle source.
 
 ## Files and runtime state
 

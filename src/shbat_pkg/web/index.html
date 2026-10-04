@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sahabat Console</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span id="conn" class="dot" title="Connection"></span>Sahabat</div>
+  <div class="chips">
+    <span class="chip" id="chip-map">map —</span>
+    <span class="chip" id="chip-mode">—</span>
+    <span class="chip" id="chip-nav">—</span>
+    <span class="chip" id="chip-loc">Localization</span>
+    <span class="chip" id="chip-scan">Lidar</span>
+    <span class="chip" id="chip-motor">Motors</span>
+    <span class="chip" id="chip-batt">Battery —</span>
+  </div>
+  <div class="actions">
+    <button id="btn-control" class="btn">Take control</button>
+    <button id="btn-estop" class="btn estop">E-STOP</button>
+  </div>
+</header>
+
+<div id="estop-banner" class="banner hidden">
+  <strong>E-stop is active.</strong> The robot will not move.
+  <button id="btn-estop-clear" class="btn small">Clear E-stop…</button>
+</div>
+
+<main class="layout">
+  <section class="mapwrap" id="mapwrap">
+    <canvas id="map"></canvas>
+    <div class="toolbar" id="tools">
+      <button data-tool="pan" class="tool active" title="Select / pan (Esc)">Select</button>
+      <button data-tool="pose" class="tool" title="2D pose estimate: press at robot position, drag toward heading">Pose estimate</button>
+      <button data-tool="goal" class="tool" title="Nav goal: press at target, drag toward heading">Nav goal</button>
+      <button data-tool="add" class="tool" title="Add waypoint: press at position, drag toward heading">+ Waypoint</button>
+    </div>
+    <div class="zoombar">
+      <button id="zoom-in" class="tool" title="Zoom in">+</button>
+      <button id="zoom-out" class="tool" title="Zoom out">−</button>
+      <button id="zoom-fit" class="tool" title="Fit map">Fit</button>
+      <button id="follow" class="tool" title="Keep robot centred">Follow</button>
+    </div>
+    <button id="gimbal" class="gimbal" title="Drag to rotate (snaps near 15° steps, hold Shift for free) · scroll for 1° (Shift 0.1°) · click to reset">
+      <svg id="gimbal-dial" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-opacity=".35" stroke-width="2"/>
+        <circle cx="22" cy="22" r="12" fill="none" stroke="currentColor" stroke-opacity=".2" stroke-width="1.5" stroke-dasharray="3 3"/>
+        <path d="M22 5 L27 22 L22 19 L17 22 Z" fill="#ef4444"/>
+        <path d="M22 39 L27 22 L22 25 L17 22 Z" fill="currentColor" fill-opacity=".45"/>
+      </svg>
+      <span id="gimbal-deg">0°</span>
+    </button>
+    <div class="hint" id="hint"></div>
+    <div class="readout" id="readout"></div>
+  </section>
+
+  <aside class="side">
+    <nav class="tabs">
+      <button data-tab="waypoints" class="tab active">Waypoints</button>
+      <button data-tab="drive" class="tab">Drive</button>
+      <button data-tab="localize" class="tab">Localize</button>
+      <button data-tab="system" class="tab">System</button>
+    </nav>
+
+    <div class="panel" data-panel="waypoints">
+      <div class="row">
+        <label class="grow">Set
+          <select id="set-select"></select>
+        </label>
+        <button class="btn small" id="set-new">New</button>
+        <button class="btn small" id="set-rename">Rename</button>
+        <button class="btn small danger-text" id="set-delete">Delete</button>
+      </div>
+      <div class="row savebar">
+        <span id="dirty" class="muted">Saved</span>
+        <span class="grow"></span>
+        <button class="btn small" id="wp-revert">Revert</button>
+        <button class="btn small primary" id="wp-save">Save</button>
+      </div>
+      <ol id="wp-list" class="wplist"></ol>
+      <div id="wp-detail" class="detail hidden">
+        <div class="row">
+          <label class="grow">Name <input id="wp-name" type="text"></label>
+          <label class="narrow">Dwell s <input id="wp-dwell" type="number" min="0" step="1"></label>
+        </div>
+        <div class="row">
+          <label>x <input id="wp-x" type="number" step="0.05"></label>
+          <label>y <input id="wp-y" type="number" step="0.05"></label>
+          <label>yaw° <input id="wp-yaw" type="number" step="5"></label>
+        </div>
+        <div class="row">
+          <label class="check"><input id="wp-enabled" type="checkbox"> Enabled</label>
+          <span class="grow"></span>
+          <button class="btn small" id="wp-here">Set to robot pose</button>
+          <button class="btn small primary" id="wp-go">Go here</button>
+        </div>
+      </div>
+      <h3>Patrol</h3>
+      <div class="row">
+        <label class="check"><input id="patrol-loop" type="checkbox"> Loop</label>
+        <span class="grow"></span>
+        <button class="btn small primary" id="patrol-start">Start</button>
+        <button class="btn small" id="patrol-pause">Pause</button>
+        <button class="btn small" id="patrol-resume">Resume</button>
+        <button class="btn small" id="patrol-stop">Stop</button>
+      </div>
+      <h3>Dock</h3>
+      <div class="row">
+        <span id="dock-info" class="muted grow">No dock saved</span>
+        <button class="btn small" id="dock-save">Save at robot</button>
+        <button class="btn small" id="dock-go">Go to dock</button>
+      </div>
+      <p class="muted small" id="segments-note"></p>
+    </div>
+
+    <div class="panel hidden" data-panel="drive">
+      <p class="muted small">Hold the pad (or W A S D / arrow keys) to drive. Releasing stops the robot, and so does losing the connection. You must have control first.</p>
+      <div class="joywrap">
+        <div id="joy" class="joy"><div id="joy-knob" class="knob"></div></div>
+      </div>
+      <div class="row">
+        <label class="grow"><span>Max linear <b id="lin-val"></b> m/s</span>
+          <input id="lin-max" type="range" min="0.05" max="0.5" step="0.05" value="0.25">
+        </label>
+      </div>
+      <div class="row">
+        <label class="grow"><span>Max turn <b id="ang-val"></b> rad/s</span>
+          <input id="ang-max" type="range" min="0.2" max="1.2" step="0.1" value="0.6">
+        </label>
+      </div>
+      <div class="row">
+        <label class="check"><input id="kbd-drive" type="checkbox"> Keyboard driving</label>
+      </div>
+      <div class="kv" id="drive-kv"></div>
+    </div>
+
+    <div class="panel hidden" data-panel="localize">
+      <div class="row">
+        <label class="check"><input id="cam-toggle" type="checkbox" checked> Show ZED camera</label>
+        <span class="grow"></span>
+        <select id="cam-fps" class="auto" title="Camera frame rate for this browser">
+          <option value="15">Smooth · 15 fps</option>
+          <option value="5">Data saver · 5 fps</option>
+        </select>
+      </div>
+      <div id="camera-card" class="camera">
+        <img id="cam" alt="ZED left camera with detected AprilTags outlined">
+        <div class="row">
+          <span class="muted small grow">Green outline = detected tag, red dot = first corner, m = decision margin.</span>
+          <a class="btn small" href="api/camera.mjpg" target="_blank" rel="noopener">Full size</a>
+        </div>
+      </div>
+      <div class="kv" id="loc-kv"></div>
+      <div class="row wrap">
+        <button class="btn small primary" id="loc-pose">Set pose on map</button>
+        <button class="btn small" id="loc-tags">Localize from tags</button>
+      </div>
+      <div class="row wrap">
+        <button class="btn small" id="loc-recover">Global relocalize + rotate</button>
+        <button class="btn small" id="loc-recover-stop">Stop rotation</button>
+      </div>
+      <h3>AprilTags</h3>
+      <p class="muted small" id="tags-status"></p>
+      <table class="tags">
+        <thead><tr><th>ID</th><th>Name</th><th>State</th><th>Dist</th><th></th></tr></thead>
+        <tbody id="tags-body"></tbody>
+      </table>
+      <div class="row">
+        <button class="btn small" id="tags-reload">Reload tag file</button>
+      </div>
+    </div>
+
+    <div class="panel hidden" data-panel="system">
+      <div class="row">
+        <label class="grow">Map <select id="map-select"></select></label>
+        <button class="btn small" id="map-load">Load</button>
+      </div>
+      <div class="kv" id="sys-kv"></div>
+      <h3>Layers</h3>
+      <div class="row wrap" id="layers">
+        <label class="check"><input type="checkbox" data-layer="scan" checked> Lidar</label>
+        <label class="check"><input type="checkbox" data-layer="plan" checked> Path</label>
+        <label class="check"><input type="checkbox" data-layer="routes" checked> Routes</label>
+        <label class="check"><input type="checkbox" data-layer="labels" checked> Labels</label>
+        <label class="check"><input type="checkbox" data-layer="tags" checked> Tags</label>
+        <label class="check"><input type="checkbox" data-layer="grid"> Grid</label>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<div id="toasts" class="toasts"></div>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <h3 id="dlg-title"></h3>
+    <p id="dlg-text"></p>
+    <input id="dlg-input" type="text" class="hidden">
+    <div class="row end">
+      <button value="cancel" class="btn">Cancel</button>
+      <button value="ok" class="btn primary" id="dlg-ok">OK</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

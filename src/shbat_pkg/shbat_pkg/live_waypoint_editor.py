@@ -93,13 +93,28 @@ def main(argv=None):
         dest='use_zed',
         action='store_true',
         default=True,
-        help='Enable the ZED camera in the operations launch (default).',
+        help='Enable the ZED camera for AprilTag detection (default).',
     )
     zed_group.add_argument(
         '--no-zed',
         dest='use_zed',
         action='store_false',
-        help='Disable the ZED camera in the operations launch.',
+        help='Disable the ZED AprilTag camera.',
+    )
+    parser.add_argument(
+        '--no-web',
+        dest='use_web',
+        action='store_false',
+        default=True,
+        help='Do not start the browser operator console.',
+    )
+    parser.add_argument('--web-port', type=int, default=8088)
+    parser.add_argument(
+        '--no-rviz',
+        dest='use_rviz',
+        action='store_false',
+        default=True,
+        help='Skip the RViz window (use the browser console instead).',
     )
     args = parser.parse_args(argv)
 
@@ -114,7 +129,10 @@ def main(argv=None):
     else:
         print('Starting Sahabat Waypoint Editor Live MAIN OPERATIONS.', flush=True)
     print(f'Localization backend: {args.localization_backend}', flush=True)
-    print(f'ZED obstacle input: {"enabled" if args.use_zed else "disabled"}', flush=True)
+    print(
+        f'ZED AprilTag camera: {"enabled" if args.use_zed else "disabled"}',
+        flush=True,
+    )
     print(f'Map: {map_id}', flush=True)
     print(f'Waypoint sets: {maps_directory / "waypoint_sets" / map_id}', flush=True)
 
@@ -136,6 +154,11 @@ def main(argv=None):
         '-p', f'active_map:={map_id}',
         '-p', f'localization_backend:={args.localization_backend}',
     ]
+    web_cmd = [
+        'ros2', 'run', 'shbat_pkg', 'web_console',
+        '--ros-args',
+        '-p', f'port:={args.web_port}',
+    ]
     editor_cmd = [
         'ros2', 'launch', 'shbat_pkg', 'waypoint_editor.launch.py',
         f'maps_directory:={maps_directory}',
@@ -145,12 +168,13 @@ def main(argv=None):
     ]
 
     processes = []
+    optional = []
     stopping = False
 
     def handle_signal(_signum, _frame):
         nonlocal stopping
         stopping = True
-        _terminate(processes)
+        _terminate(processes + optional)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
@@ -161,20 +185,29 @@ def main(argv=None):
         processes.append(subprocess.Popen(operations_cmd, env=operations_env))
         time.sleep(2.0)
         processes.append(subprocess.Popen(backend_cmd))
+        if args.use_web:
+            # Not in ``processes``: a web console failure must not stop the robot stack.
+            optional.append(subprocess.Popen(web_cmd))
+            print(
+                f'Web console: http://<robot-ip>:{args.web_port}/ '
+                '(no authentication; trusted network only)',
+                flush=True,
+            )
         time.sleep(max(0.0, args.startup_delay))
         for process in processes:
             if process.poll() is not None:
                 return process.returncode or 1
-        processes.append(subprocess.Popen(editor_cmd))
+        if args.use_rviz:
+            processes.append(subprocess.Popen(editor_cmd))
 
         while not stopping:
             for process in processes:
                 if process.poll() is not None:
-                    _terminate(processes)
+                    _terminate(processes + optional)
                     return process.returncode or 0
             time.sleep(0.25)
     finally:
-        _terminate(processes)
+        _terminate(processes + optional)
     return 0
 
 

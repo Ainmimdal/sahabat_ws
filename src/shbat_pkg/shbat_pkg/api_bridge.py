@@ -420,6 +420,7 @@ class APIBridgeNode(Node):
         *,
         touring: Optional[bool] = None,
         resumed: bool = False,
+        bypass_localization: bool = False,
     ):
         """Send a named command through operator_backend's lease boundary."""
         with self.operator_command_lock:
@@ -427,17 +428,9 @@ class APIBridgeNode(Node):
             waypoint_id = ''
             previous_event_id = 0
             if command == PatrolCommand.Request.NAVIGATE:
-                unhealthy = []
-                if self.status.emergency_stop_active:
-                    unhealthy.append('emergency stop is active')
-                for label, healthy in (
-                    ('localization', self.status.localization_healthy),
-                    ('map', self.status.map_healthy),
-                    ('laser scan', self.status.scan_healthy),
-                    ('transform tree', self.status.tf_healthy),
-                ):
-                    if not healthy:
-                        unhealthy.append(f'{label} is not healthy')
+                unhealthy = self._navigation_unhealthy_reasons(
+                    bypass_localization=bypass_localization
+                )
                 if unhealthy:
                     raise ValueError(
                         'Navigation is unavailable: ' + ', '.join(unhealthy)
@@ -535,7 +528,33 @@ class APIBridgeNode(Node):
                 except RuntimeError as error:
                     self.get_logger().warn(str(error))
 
-    def navigate_next(self, *, start_tour: bool = False):
+    def _navigation_unhealthy_reasons(
+        self,
+        *,
+        bypass_localization: bool = False,
+    ) -> list[str]:
+        """Return app navigation blockers, preserving hard stop conditions."""
+        unhealthy = []
+        if self.status.emergency_stop_active:
+            unhealthy.append('emergency stop is active')
+        health_checks = [('laser scan', self.status.scan_healthy)]
+        if not bypass_localization:
+            health_checks.extend((
+                ('localization', self.status.localization_healthy),
+                ('map', self.status.map_healthy),
+                ('transform tree', self.status.tf_healthy),
+            ))
+        for label, healthy in health_checks:
+            if not healthy:
+                unhealthy.append(f'{label} is not healthy')
+        return unhealthy
+
+    def navigate_next(
+        self,
+        *,
+        start_tour: bool = False,
+        bypass_localization: bool = False,
+    ):
         """Navigate to the next available exhibit and then wait there."""
         self.refresh_tour_catalog()
         with self.tour_lock:
@@ -553,9 +572,10 @@ class APIBridgeNode(Node):
             PatrolCommand.Request.NAVIGATE,
             station_id,
             touring=True if start_tour else None,
+            bypass_localization=bypass_localization,
         )
 
-    def resume_tour_navigation(self):
+    def resume_tour_navigation(self, *, bypass_localization: bool = False):
         """Resume only the interrupted target, never the whole waypoint set."""
         with self.tour_lock:
             if self.tour.target is None or self.tour.state != 'paused':
@@ -571,6 +591,7 @@ class APIBridgeNode(Node):
             waypoint_name,
             touring=touring,
             resumed=True,
+            bypass_localization=bypass_localization,
         )
 
     def tour_status(self, refresh: bool = True):
@@ -840,6 +861,14 @@ class APIBridgeNode(Node):
 ros_node: Optional[APIBridgeNode] = None
 
 
+def _local_sahabot_localization_bypass() -> bool:
+    """Allow the local SahaBot app to skip only localization readiness."""
+    return (
+        request.remote_addr in ('127.0.0.1', '::1')
+        and request.headers.get('X-SahaBot-Bypass-Localization') == '1'
+    )
+
+
 def create_flask_app() -> Flask:
     """Create and configure Flask application"""
     app = Flask(__name__)
@@ -913,6 +942,7 @@ def create_flask_app() -> Flask:
                 PatrolCommand.Request.NAVIGATE,
                 exhibit.strip(),
                 touring=False,
+                bypass_localization=_local_sahabot_localization_bypass(),
             )
             return jsonify({
                 **result,
@@ -930,7 +960,9 @@ def create_flask_app() -> Flask:
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
         try:
-            return jsonify(ros_node.navigate_next())
+            return jsonify(ros_node.navigate_next(
+                bypass_localization=_local_sahabot_localization_bypass()
+            ))
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 404
         except RuntimeError as error:
@@ -952,6 +984,7 @@ def create_flask_app() -> Flask:
                 PatrolCommand.Request.NAVIGATE,
                 DOCK_WAYPOINT_ID,
                 touring=False,
+                bypass_localization=_local_sahabot_localization_bypass(),
             ))
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 404
@@ -990,7 +1023,9 @@ def create_flask_app() -> Flask:
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
         try:
-            return jsonify(ros_node.resume_tour_navigation())
+            return jsonify(ros_node.resume_tour_navigation(
+                bypass_localization=_local_sahabot_localization_bypass()
+            ))
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 409
         except RuntimeError as error:
@@ -1002,7 +1037,10 @@ def create_flask_app() -> Flask:
         if ros_node is None:
             return jsonify({'error': 'ROS node not initialized'}), 503
         try:
-            return jsonify(ros_node.navigate_next(start_tour=True))
+            return jsonify(ros_node.navigate_next(
+                start_tour=True,
+                bypass_localization=_local_sahabot_localization_bypass(),
+            ))
         except ValueError as error:
             return jsonify({'success': False, 'error': str(error)}), 404
         except RuntimeError as error:

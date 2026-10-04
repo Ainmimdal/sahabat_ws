@@ -1,20 +1,21 @@
 <!--
   NavigateToPose tree for Sahabat operations.
 
-  Recompute when the goal changes, the path becomes invalid, or the current
-  path is five seconds old. Smooth each newly planned path once before handing
-  it to the controller.
+  Compute an initial path, then recompute when the goal changes, the path
+  becomes invalid, or the current path is twenty seconds old. Recovery for an
+  ordinary goal remains stationary: clear costmaps, wait briefly, then fail
+  instead of automatically spinning or backing up.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+    <RecoveryNode number_of_retries="2" name="NavigateRecovery">
       <PipelineSequence name="NavigateWithReplanning">
         <RateController hz="1.0" name="RateControllerComputePathToPose">
           <RecoveryNode number_of_retries="1" name="RecoveryComputePathToPose">
             <Fallback name="FallbackComputePathToPose">
               <ReactiveSequence name="CheckIfNewPathNeeded">
                 <Inverter>
-                  <PathExpiringTimer seconds="5" path="{path}"/>
+                  <PathExpiringTimer seconds="20" path="{path}"/>
                 </Inverter>
                 <Inverter>
                   <GlobalUpdatedGoal/>
@@ -46,9 +47,7 @@
             <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
             <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
           </Sequence>
-          <Spin name="SpinRecovery" spin_dist="1.57"/>
           <Wait name="WaitRecovery" wait_duration="5"/>
-          <BackUp name="BackUpRecovery" backup_dist="0.30" backup_speed="0.05"/>
         </RoundRobin>
       </ReactiveFallback>
     </RecoveryNode>

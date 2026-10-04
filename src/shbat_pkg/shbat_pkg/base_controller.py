@@ -33,7 +33,7 @@ class BaseController(Node):
         super().__init__('base_controller')
         
         # Declare parameters with defaults for 173mm wheel robot
-        self.declare_parameter('port', '/dev/ttyUSB0')
+        self.declare_parameter('port', '/dev/motor')
         self.declare_parameter('baudrate', 115200)
         self.declare_parameter('wheel_radius', 0.0875)  # 175mm diameter / 2 = 87.5mm
         self.declare_parameter('wheel_base', 0.33)  # Distance between wheels in meters
@@ -42,7 +42,8 @@ class BaseController(Node):
         self.declare_parameter('base_frame', 'base_link')
         self.declare_parameter('odom_topic', 'wheel_odom')  # Changed to avoid conflict with EKF
         self.declare_parameter('accel_time_ms', 200)
-        self.declare_parameter('decel_time_ms', 200)
+        self.declare_parameter('decel_time_ms', 500)
+        self.declare_parameter('quick_stop_decel_time_ms', 10)
         self.declare_parameter('max_linear_vel', 1.0)  # m/s
         self.declare_parameter('max_angular_vel', 2.0)  # rad/s
         self.declare_parameter('cmd_vel_timeout', 0.5)  # seconds
@@ -59,6 +60,9 @@ class BaseController(Node):
         self.odom_topic = self.get_parameter('odom_topic').value
         self.accel_time = self.get_parameter('accel_time_ms').value
         self.decel_time = self.get_parameter('decel_time_ms').value
+        self.quick_stop_decel_time = self.get_parameter(
+            'quick_stop_decel_time_ms'
+        ).value
         self.max_linear_vel = self.get_parameter('max_linear_vel').value
         self.max_angular_vel = self.get_parameter('max_angular_vel').value
         self.cmd_vel_timeout = self.get_parameter('cmd_vel_timeout').value
@@ -191,10 +195,29 @@ class BaseController(Node):
                 ),
                 'set deceleration time',
             )
+            self._require_modbus_success(
+                self.driver.set_quick_stop_mode(6),
+                'select dedicated quick-stop deceleration',
+            )
+            self._require_modbus_success(
+                self.driver.set_quick_stop_decel_time(
+                    self.quick_stop_decel_time,
+                    self.quick_stop_decel_time,
+                ),
+                'set quick-stop deceleration time',
+            )
             actual_accel = self.driver.get_accel_time()
             actual_decel = self.driver.get_decel_time()
+            actual_quick_stop_mode = self.driver.get_quick_stop_mode()
+            actual_quick_stop_decel = (
+                self.driver.get_quick_stop_decel_time()
+            )
             expected_accel = (int(self.accel_time), int(self.accel_time))
             expected_decel = (int(self.decel_time), int(self.decel_time))
+            expected_quick_stop_decel = (
+                int(self.quick_stop_decel_time),
+                int(self.quick_stop_decel_time),
+            )
             if actual_accel != expected_accel:
                 raise IOError(
                     f'acceleration readback {actual_accel} ms does not match '
@@ -205,6 +228,17 @@ class BaseController(Node):
                     f'deceleration readback {actual_decel} ms does not match '
                     f'requested {expected_decel} ms'
                 )
+            if actual_quick_stop_mode != 6:
+                raise IOError(
+                    f'quick-stop mode readback {actual_quick_stop_mode} does '
+                    'not match requested mode 6'
+                )
+            if actual_quick_stop_decel != expected_quick_stop_decel:
+                raise IOError(
+                    'quick-stop deceleration readback '
+                    f'{actual_quick_stop_decel} ms does not match requested '
+                    f'{expected_quick_stop_decel} ms'
+                )
             self._require_modbus_success(
                 self.driver.enable_motor(), 'enable motors'
             )
@@ -212,7 +246,8 @@ class BaseController(Node):
             
             self.get_logger().info(
                 f'ZLAC8015D driver initialized on {self.port}; '
-                f'accel={actual_accel} ms, decel={actual_decel} ms'
+                f'accel={actual_accel} ms, decel={actual_decel} ms, '
+                f'quick_stop={actual_quick_stop_decel} ms'
             )
             
         except Exception as e:
@@ -240,18 +275,59 @@ class BaseController(Node):
             self.get_logger().warn('EMERGENCY STOP ACTIVATED - motors stopped!')
             self.stop_motors()
         elif not msg.data and self.emergency_stopped:
+            try:
+                # Quick stop may retain the previous target registers. Write a
+                # zero target while quick stop is still active so clearing it
+                # cannot resume the command that was active when it was pressed.
+                self._require_modbus_success(
+                    self.driver.set_rpm(0, 0),
+                    'zero targets before clearing E-stop',
+                )
+                self._require_modbus_success(
+                    self.driver.clear_alarm(),
+                    'clear quick-stop state',
+                )
+                self._require_modbus_success(
+                    self.driver.enable_motor(),
+                    'enable motors after clearing E-stop',
+                )
+            except Exception as error:
+                self.get_logger().error(
+                    f'Failed to clear motor quick-stop state: {error}'
+                )
+                return
+            self.last_cmd_vel_time = self.get_clock().now()
             self.emergency_stopped = False
             self.get_logger().info('Emergency stop cleared - motors enabled')
     
     def stop_motors(self):
-        """Immediately stop all motors."""
+        """Stop both motors with the dedicated ZLAC quick-stop profile."""
+        self.target_linear_vel = 0.0
+        self.target_angular_vel = 0.0
         if self.driver:
             try:
-                self.driver.set_rpm(0, 0)
-                self.target_linear_vel = 0.0
-                self.target_angular_vel = 0.0
-            except Exception as e:
-                self.get_logger().error(f'Failed to stop motors: {e}')
+                # Clear the retained target first, then invoke control word
+                # 0x05. A failed target write must not prevent the independent
+                # quick-stop command from being attempted.
+                self._require_modbus_success(
+                    self.driver.set_rpm(0, 0),
+                    'zero targets for E-stop',
+                )
+            except Exception as error:
+                self.get_logger().error(
+                    f'Failed to zero targets for E-stop: {error}'
+                )
+            try:
+                self._require_modbus_success(
+                    self.driver.emergency_stop(),
+                    'quick-stop motors',
+                )
+            except Exception as error:
+                self.get_logger().error(f'Failed to quick-stop motors: {error}')
+                try:
+                    self.driver.disable_motor()
+                except Exception:
+                    pass
 
     def cmd_vel_callback(self, msg: Twist):
         """

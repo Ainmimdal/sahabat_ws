@@ -27,10 +27,12 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
 add_library(${PROJECT_NAME} SHARED
+  include/shbat_rviz_plugins/apriltag_landmarks_panel.hpp
   include/shbat_rviz_plugins/localization_recovery_panel.hpp
   include/shbat_rviz_plugins/navigation_status_panel.hpp
   include/shbat_rviz_plugins/waypoint_editor_panel.hpp
   include/shbat_rviz_plugins/waypoint_editor_tool.hpp
+  src/apriltag_landmarks_panel.cpp
   src/localization_recovery_panel.cpp
   src/navigation_status_panel.cpp
   src/waypoint_editor_panel.cpp

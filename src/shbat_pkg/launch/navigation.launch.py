@@ -20,9 +20,12 @@ def generate_launch_description():
 
     mode = LaunchConfiguration('mode')
     map_file = LaunchConfiguration('map_file')
+    maps_directory = LaunchConfiguration('maps_directory')
+    map_id = LaunchConfiguration('map_id')
     use_ekf = LaunchConfiguration('use_ekf')
     use_rviz = LaunchConfiguration('use_rviz')
     use_zed = LaunchConfiguration('use_zed')
+    use_apriltag = LaunchConfiguration('use_apriltag')
     use_keepout = LaunchConfiguration('use_keepout')
     keepout_mask_file = LaunchConfiguration('keepout_mask_file')
     localization_backend = LaunchConfiguration('localization_backend')
@@ -47,9 +50,18 @@ def generate_launch_description():
             description='Navigation mode',
         ),
         DeclareLaunchArgument('map_file', default_value=''),
+        DeclareLaunchArgument(
+            'maps_directory', default_value='~/sahabat_ws/maps'
+        ),
+        DeclareLaunchArgument('map_id', default_value=''),
         DeclareLaunchArgument('use_ekf', default_value='true'),
         DeclareLaunchArgument('use_rviz', default_value='true'),
-        DeclareLaunchArgument('use_zed', default_value='false'),
+        DeclareLaunchArgument(
+            'use_zed',
+            default_value='false',
+            description='Enable the ZED left image for AprilTag detection',
+        ),
+        DeclareLaunchArgument('use_apriltag', default_value='false'),
         DeclareLaunchArgument('use_keepout', default_value='true'),
         DeclareLaunchArgument('keepout_mask_file', default_value=''),
         DeclareLaunchArgument(
@@ -97,8 +109,11 @@ def generate_launch_description():
         launch_arguments={
             'mode': mode,
             'map_file': map_file,
+            'maps_directory': maps_directory,
+            'map_id': map_id,
             'use_rviz': use_rviz,
             'use_zed': use_zed,
+            'use_apriltag': use_apriltag,
             'use_keepout': use_keepout,
             'keepout_mask_file': keepout_mask_file,
             'localization_backend': localization_backend,

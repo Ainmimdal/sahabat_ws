@@ -47,7 +47,7 @@ import yaml
 # The persistent remote bringup already owns the serial devices. Avoid probing
 # those live ports again when a managed navigation-only child is launched.
 if os.environ.get('SAHABAT_SKIP_DEVICE_DETECTION') == '1':
-    lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+    lidar_port, imu_port, motor_port = None, None, '/dev/motor'
 else:
     import sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -56,7 +56,7 @@ else:
         lidar_port, imu_port, motor_port = smart_detect_devices()
     except Exception as e:
         print(f"Warning: Could not import device detection: {e}")
-        lidar_port, imu_port, motor_port = None, None, '/dev/ttyUSB0'
+        lidar_port, imu_port, motor_port = None, None, '/dev/motor'
 
 # Try to load saved pose from previous session
 SAVED_POSE_FILE = os.path.expanduser('~/.ros/sahabat_saved_pose.yaml')
@@ -226,9 +226,18 @@ def generate_launch_description():
     use_zed_arg = DeclareLaunchArgument(
         'use_zed',
         default_value='false',
-        description='Enable ZED camera for obstacle detection (PointCloud2 to VoxelLayer)'
+        description='Enable the ZED left image for AprilTag detection'
     )
     use_zed = LaunchConfiguration('use_zed')
+
+    use_apriltag_arg = DeclareLaunchArgument(
+        'use_apriltag',
+        default_value='false',
+        description=(
+            'Detect fixed AprilTags and use saved tag landmarks to seed AMCL'
+        ),
+    )
+    use_apriltag = LaunchConfiguration('use_apriltag')
 
     localization_backend_arg = DeclareLaunchArgument(
         'localization_backend',
@@ -290,6 +299,14 @@ def generate_launch_description():
             "'", use_hardware, "' == 'true' and '", feature, "' == 'true'"
         ]))
 
+    def zed_apriltag_hardware_condition():
+        return IfCondition(PythonExpression([
+            "'", use_hardware, "' == 'true' and '",
+            mode, "' == 'localization' and '",
+            localization_backend, "' == 'amcl' and '",
+            use_zed, "' == 'true' and '", use_apriltag, "' == 'true'",
+        ]))
+
     use_saved_initial_pose_arg = DeclareLaunchArgument(
         'use_saved_initial_pose',
         default_value='false',
@@ -321,7 +338,7 @@ def generate_launch_description():
 
     motor_port_arg = DeclareLaunchArgument(
         'motor_port',
-        default_value=motor_port if motor_port else '/dev/ttyUSB0',
+        default_value=motor_port if motor_port else '/dev/motor',
         description='Motor controller serial port'
     )
     motor_port_cfg = LaunchConfiguration('motor_port')
@@ -342,9 +359,8 @@ def generate_launch_description():
 
     # ========== Robot Description (URDF) ==========
 
-    # Use ZED URDF when use_zed is enabled (includes ZED camera frames)
-    # Note: We need to process this at launch time based on use_zed arg
-    # For simplicity, we'll use the non-ZED URDF and add ZED TF via static publisher
+    # Keep the base URDF unchanged; the AprilTag-only ZED frames are added by
+    # guarded static publishers below.
     xacro_file = os.path.join(pkg_share, 'urdf', 'sahabat_robot.urdf.xacro')
     robot_description = xacro.process_file(xacro_file).toxml()
 
@@ -382,7 +398,8 @@ def generate_launch_description():
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},
             {'accel_time_ms': 200},
-            {'decel_time_ms': 200},
+            {'decel_time_ms': 500},
+            {'quick_stop_decel_time_ms': 10},
             {'max_linear_vel': 0.5},     # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
             {'cmd_vel_timeout': 0.5},
@@ -444,7 +461,7 @@ def generate_launch_description():
         condition=hardware_and(use_imu)
     )
 
-    # ========== ZED Camera (Obstacle Detection) ==========
+    # ========== ZED Camera (AprilTag image only) ==========
 
     # ZED common config
     zed_config_common = os.path.join(
@@ -456,16 +473,16 @@ def generate_launch_description():
     # Adjust these values based on where ZED is mounted on your robot!
     # x=forward, y=left, z=up (in meters)
     # base_link is at wheel axle height (8.75cm above floor for 175mm wheels)
-    # ZED is 70cm from floor, so Z = 70 - 8.75 = 61.25cm
+    # ZED is 67cm from floor, so Z = 67 - 8.75 = 58.25cm
     zed_static_tf = Node(
-        condition=hardware_and(use_zed),
+        condition=zed_apriltag_hardware_condition(),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_base_link_tf',
         arguments=[
             '--x', '0.05',      # 5cm forward from base_link
             '--y', '0.0',       # centered
-            '--z', '0.6125',    # 61.25cm above base_link (70cm from floor - 8.75cm axle height)
+            '--z', '0.5825',    # 58.25cm above base_link (67cm from floor - 8.75cm axle height)
             '--roll', '0.0',
             '--pitch', '0.0',
             '--yaw', '0.0',
@@ -488,15 +505,14 @@ def generate_launch_description():
             {
                 'general.camera_name': 'zed2i',
                 'general.camera_model': 'zed2i',
-                'general.grab_resolution': 'VGA',
+                # HD720 roughly doubles AprilTag detection range and pose
+                # accuracy versus VGA; depth stays disabled so GPU load is low.
+                'general.grab_resolution': 'HD720',
                 'general.grab_frame_rate': 15,
                 'general.pub_frame_rate': 15.0,
-                # Depth settings
-                'depth.depth_mode': 'PERFORMANCE',
-                'depth.min_depth': 0.3,
-                'depth.max_depth': 10.0,
-                'depth.depth_stabilization': 0,         # Must be 0 when pos_tracking disabled
-                'depth.point_cloud_freq': 10.0,
+                # AprilTag needs only the rectified left image and camera info.
+                # NONE prevents depth and point-cloud generation.
+                'depth.depth_mode': 'NONE',
                 # Position tracking - DISABLED (we use EKF)
                 'pos_tracking.pos_tracking_enabled': False,
                 'pos_tracking.publish_tf': False,
@@ -505,6 +521,8 @@ def generate_launch_description():
                 'object_detection.od_enabled': False,
                 'body_tracking.bt_enabled': False,
                 'sensors.publish_imu_tf': False,
+                # Plain ROS images for apriltag_ros (no NITROS type negotiation).
+                'debug.disable_nitros': True,
             }
         ],
         extra_arguments=[{'use_intra_process_comms': True}]
@@ -514,7 +532,7 @@ def generate_launch_description():
     # These are the transforms from zed_camera_link to the optical frames
     # Values from ZED 2i specs: left camera is 6cm from center
     zed_left_camera_tf = Node(
-        condition=hardware_and(use_zed),
+        condition=zed_apriltag_hardware_condition(),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_left_camera_tf',
@@ -532,7 +550,7 @@ def generate_launch_description():
 
     # Optical frame has different orientation (Z forward, X right, Y down)
     zed_left_optical_tf = Node(
-        condition=hardware_and(use_zed),
+        condition=zed_apriltag_hardware_condition(),
         package='tf2_ros',
         executable='static_transform_publisher',
         name='zed_left_optical_tf',
@@ -548,16 +566,15 @@ def generate_launch_description():
         ],
     )
 
-    # Container for ZED components (just ZED wrapper, pointcloud goes directly to costmap)
+    # The wrapper publishes only the camera stream required by AprilTag detection.
     zed_container = ComposableNodeContainer(
-        condition=hardware_and(use_zed),
+        condition=zed_apriltag_hardware_condition(),
         name='zed_container',
         namespace='zed',
         package='rclcpp_components',
         executable='component_container',
         composable_node_descriptions=[
             zed_wrapper_component,
-            # depth_to_laserscan removed - using VoxelLayer with PointCloud2 instead
         ],
         output='screen',
     )
@@ -688,6 +705,45 @@ def generate_launch_description():
         ]))
     )
 
+    apriltag_config = os.path.join(
+        pkg_share, 'config', 'apriltag_landmarks.yaml'
+    )
+    apriltag_condition = IfCondition(PythonExpression([
+        "'", mode, "' == 'localization' and '",
+        localization_backend, "' == 'amcl' and '",
+        use_zed, "' == 'true' and '", use_apriltag, "' == 'true'",
+    ]))
+    apriltag_detector = Node(
+        package='apriltag_ros',
+        executable='apriltag_node',
+        name='apriltag',
+        output='screen',
+        parameters=[apriltag_config],
+        remappings=[
+            ('image_rect', '/zed/zed_node/left/image_rect_color'),
+            ('camera_info', '/zed/zed_node/left/camera_info'),
+            ('detections', '/apriltag/detections'),
+        ],
+        condition=apriltag_condition,
+    )
+    apriltag_landmark_manager = Node(
+        package='shbat_pkg',
+        executable='apriltag_landmark_manager',
+        name='apriltag_landmark_manager',
+        output='screen',
+        respawn=True,
+        respawn_delay=2.0,
+        parameters=[
+            apriltag_config,
+            {
+                'maps_directory': maps_directory,
+                'map_id': map_id,
+                'map_file': map_file,
+            },
+        ],
+        condition=apriltag_condition,
+    )
+
     def keepout_setup(context, *_args, **_kwargs):
         context.launch_configurations['keepout_enabled'] = 'false'
         if mode.perform(context) != 'localization':
@@ -749,7 +805,10 @@ def generate_launch_description():
                 'use_sim_time': False,
                 'type': 0,
                 'filter_info_topic': 'keepout_costmap_filter_info',
-                'mask_topic': 'keepout_filter_mask',
+                # Costmaps live in namespaces. Use an absolute topic so both
+                # filters subscribe to the one mask server instead of looking
+                # for local_costmap/global_costmap-relative mask topics.
+                'mask_topic': '/keepout_filter_mask',
                 'base': 0.0,
                 'multiplier': 1.0,
             }],
@@ -1114,6 +1173,7 @@ def generate_launch_description():
         use_rviz_arg,
         use_foxglove_arg,
         use_zed_arg,
+        use_apriltag_arg,
         localization_backend_arg,
         use_api_arg,
         use_mapping_panel_arg,
@@ -1139,7 +1199,7 @@ def generate_launch_description():
         scan_filter_node,
         imu_node,
 
-        # ZED Camera (obstacle detection)
+        # ZED camera (AprilTag image only)
         zed_static_tf,
         zed_left_camera_tf,
         zed_left_optical_tf,
@@ -1159,6 +1219,8 @@ def generate_launch_description():
         map_server,
         amcl_node,
         lifecycle_manager_localization,
+        apriltag_detector,
+        apriltag_landmark_manager,
         slam_toolbox_localization,
         keepout_nodes,
 

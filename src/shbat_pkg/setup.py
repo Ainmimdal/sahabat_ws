@@ -59,6 +59,7 @@ setup(
             'config/collision_monitor_operator.yaml',
             'config/foxglove_operator.yaml',
             'config/junctek_battery.yaml',
+            'config/apriltag_landmarks.yaml',
         ]),
         ('share/' + package_name + '/behavior_trees', [
             'behavior_trees/navigate_to_pose_replan_if_path_invalid.xml',
@@ -68,6 +69,11 @@ setup(
             'rviz/nav2_test.rviz',
             'rviz/slam_nav.rviz',
             'rviz/waypoint_editor.rviz',
+        ]),
+        ('share/' + package_name + '/web', [
+            'web/index.html',
+            'web/app.js',
+            'web/style.css',
         ]),
  
     ],
@@ -111,10 +117,12 @@ setup(
             'mobile_gateway = shbat_pkg.mobile_gateway:main',
             'localization_recovery = shbat_pkg.localization_recovery:main',
             'dock_pose_initializer = shbat_pkg.dock_pose_initializer:main',
+            'apriltag_landmark_manager = shbat_pkg.apriltag_landmark_manager:main',
             'live_waypoint_editor = shbat_pkg.live_waypoint_editor:main',
             'continue_mapping_session = shbat_pkg.continue_mapping_session:main',
             'junctek_battery = shbat_pkg.junctek_battery:main',
             'junctek_monitor = shbat_pkg.junctek_monitor:main',
+            'web_console = shbat_pkg.web_console:main',
         ],
     },
 )

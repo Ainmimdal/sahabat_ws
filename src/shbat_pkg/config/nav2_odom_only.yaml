@@ -18,7 +18,9 @@ bt_navigator:
     robot_base_frame: base_link
     odom_topic: /odom            # EKF filtered odometry
     bt_loop_duration: 10
-    default_server_timeout: 20
+    # Retain the later Jetson service-timeout fix; this is independent of the
+    # planner and prevents false recovery activation under load.
+    default_server_timeout: 200
     wait_for_service_timeout: 1000
     transform_tolerance: 1.0
     # Nav2 default behavior trees - NOT setting these params uses the package defaults
@@ -79,48 +81,75 @@ controller_server:
     odom_topic: /odom
 
     progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
+      # A behind-goal maneuver initially makes angular, not linear, progress.
+      # SimpleProgressChecker ignored rotation and aborted the controller after
+      # 20 seconds even while the robot was turning correctly.
+      plugin: "nav2_controller::PoseProgressChecker"
       required_movement_radius: 0.3
+      required_movement_angle: 0.20
       movement_time_allowance: 20.0
 
     general_goal_checker:
       stateful: True               # Once in tolerance, stay "reached" even if drifts slightly
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.10      # Avoid low-speed corrections inside localization noise
-      yaw_goal_tolerance: 0.12     # ~7 degrees is adequate for gallery stops
+      xy_goal_tolerance: 0.10      # Avoid repeated corrections inside localization noise
+      yaw_goal_tolerance: 0.12     # ~7 degrees avoids final-heading hunting
 
     FollowPath:
-      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.42     # Slightly below the 0.5 m/s joystick maximum
-      max_linear_vel: 0.5          # Conservative physical command cap
-      min_linear_vel: 0.05
-      min_approach_linear_velocity: 0.08  # Avoid crawling below reliable motor motion
-      approach_velocity_scaling_dist: 0.8 # Start a gradual slowdown before the goal
-      max_angular_vel: 0.5         # 0.5 rad/s for 10Hz LIDAR sync
-      min_angular_vel: 0.05
-      lookahead_dist: 0.5          # Shorter aim point reduces corner cutting
-      min_lookahead_dist: 0.3
-      max_lookahead_dist: 0.9
-      lookahead_time: 1.5
-      use_rotate_to_heading: true
-      rotate_to_heading_angular_vel: 0.5  # Use the full lidar-safe turn rate
-      # Must overcome drivetrain stiction on the first controller command.
-      # The downstream velocity smoother still limits the physical ramp.
-      max_angular_accel: 3.0
-      # Drive small errors as arcs, but pivot before an indoor turn becomes too
-      # tight for the 0.5 rad/s angular limit.
-      rotate_to_heading_min_angle: 0.6  # Arc through small errors; pivot only for real turns
+      # DWB scores complete velocity trajectories instead of following RPP's
+      # moving lookahead point. The RotateToGoal critic explicitly slows linear
+      # motion, stops, then minimizes predicted final-yaw error.
+      plugin: "dwb_core::DWBLocalPlanner"
+      debug_trajectory_details: false
+      min_vel_x: 0.0
+      min_vel_y: 0.0
+      max_vel_x: 0.4               # Enough to cross the carpet transition
+      max_vel_y: 0.0               # Differential drive cannot move laterally
+      max_vel_theta: 0.5           # Lidar-safe limit for the 10 Hz scan rate
+      min_speed_xy: 0.01
+      max_speed_xy: 0.4
+      # Commands below ~0.056 rad/s truncate to 0 RPM in the integer motor
+      # interface, and 0.10 rad/s still becomes only 1 RPM. Use ~2 RPM so
+      # side/behind-goal turns reliably overcome drivetrain stiction.
+      min_speed_theta: 0.15
+      acc_lim_x: 0.6
+      acc_lim_y: 0.0
+      acc_lim_theta: 3.0           # First 20 Hz sample can overcome drivetrain stiction
+      decel_lim_x: -0.35
+      decel_lim_y: 0.0
+      decel_lim_theta: -3.0        # Command braking early; motor still ramps over 500 ms
+      # Keep the trajectory search small enough for the Jetson to sustain the
+      # 20 Hz controller deadline. The former 20 x 40 grid evaluated 819 valid
+      # trajectories per cycle and repeatedly missed the deadline.
+      vx_samples: 10
+      vy_samples: 1
+      vtheta_samples: 20
+      sim_time: 1.2                # Still spans the measured drivetrain response delay
+      linear_granularity: 0.05
+      angular_granularity: 0.05
       transform_tolerance: 0.5
-      use_velocity_scaled_lookahead_dist: true
-      allow_reversing: false
-      use_regulated_linear_velocity_scaling: true
-      use_cost_regulated_linear_velocity_scaling: false  # DISABLED - was causing slowdown near obstacles
-      use_collision_detection: true
-      cost_scaling_dist: 0.3       # Reduced from 0.5
-      cost_scaling_gain: 0.5       # Reduced from 1.0 - less aggressive slowdown
-      inflation_cost_scaling_factor: 3.0
-      regulated_linear_scaling_min_radius: 0.9
-      regulated_linear_scaling_min_speed: 0.15  # Permit tight, lidar-safe indoor turns
+      xy_goal_tolerance: 0.10
+      trans_stopped_velocity: 0.05
+      short_circuit_trajectory_evaluation: true
+      stateful: true
+      publish_evaluation: false
+      publish_global_plan: false
+      publish_transformed_plan: false
+      publish_local_plan: false
+      publish_trajectories: false
+      publish_cost_grid_pc: false
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.02
+      PathAlign.scale: 32.0
+      PathAlign.forward_point_distance: 0.1
+      GoalAlign.scale: 24.0
+      GoalAlign.forward_point_distance: 0.1
+      PathDist.scale: 32.0
+      GoalDist.scale: 24.0
+      RotateToGoal.scale: 32.0
+      # Prefer a lower linear velocity once inside the final XY goal window.
+      RotateToGoal.slowing_factor: 8.0
+      RotateToGoal.lookahead_time: -1.0
 
 local_costmap:
   local_costmap:
@@ -148,7 +177,7 @@ local_costmap:
         min_obstacle_height: 0.05  # Ignore ground (below 5cm)
         mark_threshold: 0          # Mark cell as obstacle if any point hits
         unknown_threshold: 15
-        observation_sources: scan zed_pointcloud
+        observation_sources: scan
         
         scan:
           topic: /scan
@@ -161,18 +190,6 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 7.0
           obstacle_min_range: 0.15
-          
-        zed_pointcloud:
-          topic: /zed/zed_node/point_cloud/cloud_registered
-          max_obstacle_height: 1.0   # ZED obstacles up to 1m
-          min_obstacle_height: 0.05  # Ignore ground
-          clearing: True
-          marking: True
-          data_type: "PointCloud2"
-          raytrace_max_range: 6.0
-          raytrace_min_range: 0.3
-          obstacle_max_range: 5.0
-          obstacle_min_range: 0.3
           
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -213,7 +230,7 @@ global_costmap:
         min_obstacle_height: 0.05
         mark_threshold: 0
         unknown_threshold: 15
-        observation_sources: scan zed_pointcloud
+        observation_sources: scan
         
         scan:
           topic: /scan
@@ -226,18 +243,6 @@ global_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 7.0
           obstacle_min_range: 0.15
-          
-        zed_pointcloud:
-          topic: /zed/zed_node/point_cloud/cloud_registered
-          max_obstacle_height: 1.0
-          min_obstacle_height: 0.05
-          clearing: True
-          marking: True
-          data_type: "PointCloud2"
-          raytrace_max_range: 6.0
-          raytrace_min_range: 0.3
-          obstacle_max_range: 5.0
-          obstacle_min_range: 0.3
           
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -296,13 +301,15 @@ velocity_smoother:
     use_sim_time: False
     smoothing_frequency: 30.0
     scale_velocities: True
+    # Accumulate the ramp from the previously published command. CLOSED_LOOP
+    # repeatedly resets to zero below drivetrain stiction and cannot start.
     feedback: "OPEN_LOOP"
     max_velocity: [0.5, 0.0, 0.5]      # Conservative linear and lidar-safe turn caps
     min_velocity: [-0.3, 0.0, -0.5]    # Reverse remains limited to recovery behavior
-    max_accel: [0.6, 0.0, 0.8]         # Gentle normal acceleration
-    # Keep forward braking gentle, but stop rotation promptly after the goal
-    # checker accepts yaw so angular coasting does not spoil the final pose.
-    max_decel: [-0.5, 0.0, -3.0]
+    max_accel: [0.6, 0.0, 3.0]         # Let DWB select turn speed without a second slow ramp
+    # Request prompt angular braking when DWB reduces its command. The motor retains
+    # its smooth 500 ms normal ramp; E-stop remains a separate 10 ms quick stop.
+    max_decel: [-0.35, 0.0, -3.0]
     odom_topic: /odom
     odom_duration: 0.1
     deadband_velocity: [0.0, 0.0, 0.0]

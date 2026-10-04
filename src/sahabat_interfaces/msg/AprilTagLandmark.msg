@@ -1,0 +1,14 @@
+int32 id
+string name
+string family
+float64 size_m
+geometry_msgs/Pose pose
+uint32 sample_count
+float64 translation_std_m
+float64 rotation_std_rad
+bool saved
+bool visible
+bool capture_in_progress
+int32 hamming
+float64 decision_margin
+float64 distance_m

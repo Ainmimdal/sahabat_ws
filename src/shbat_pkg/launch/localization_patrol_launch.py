@@ -10,7 +10,7 @@ Usage:
   # Basic localization with patrol GUI
   ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/my_map
 
-  # With ZED camera for better obstacle detection
+  # With ZED camera for AprilTag startup localization
   ros2 launch shbat_pkg localization_patrol_launch.py map_file:=/home/sahabat/maps/my_map use_zed:=true
 
   # With API Bridge (for Pi/LLM control)
@@ -32,7 +32,13 @@ Usage:
 import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    GroupAction,
+    IncludeLaunchDescription,
+    TimerAction,
+)
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -67,10 +73,17 @@ def generate_launch_description():
     
     use_zed_arg = DeclareLaunchArgument(
         'use_zed',
-        default_value='false',
-        description='Enable ZED camera for obstacle detection (PointCloud to costmap)'
+        default_value='true',
+        description='Enable the ZED left image for AprilTag detection'
     )
     use_zed = LaunchConfiguration('use_zed')
+
+    use_apriltag_arg = DeclareLaunchArgument(
+        'use_apriltag',
+        default_value='true',
+        description='Use saved AprilTags for AMCL startup localization',
+    )
+    use_apriltag = LaunchConfiguration('use_apriltag')
 
     use_keepout_arg = DeclareLaunchArgument(
         'use_keepout',
@@ -203,30 +216,38 @@ def generate_launch_description():
     
     # ========== Include SLAM Navigation Launch ==========
     
-    slam_nav_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(pkg_share, 'launch', 'slam_nav_launch.py')
-        ),
-        launch_arguments={
-            'mode': 'localization',
-            'map_file': map_file,
-            'maps_directory': maps_directory,
-            'map_id': map_id,
-            'use_zed': use_zed,
-            'use_keepout': use_keepout,
-            'keepout_mask_file': keepout_mask_file,
-            'localization_backend': localization_backend,
-            'use_rviz': use_rviz,
-            'use_foxglove': use_foxglove,
-            'initial_pose_x': initial_pose_x,
-            'initial_pose_y': initial_pose_y,
-            'initial_pose_yaw': initial_pose_yaw,
-            'joy_cmd_topic': joy_cmd_topic,
-            'smoothed_cmd_topic': smoothed_cmd_topic,
-            'operator_safety': operator_safety,
-            'use_saved_initial_pose': use_saved_initial_pose,
-            'use_hardware': use_hardware,
-        }.items()
+    slam_nav_launch = GroupAction(
+        scoped=True,
+        actions=[IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(pkg_share, 'launch', 'slam_nav_launch.py')
+            ),
+            launch_arguments={
+                'mode': 'localization',
+                'map_file': map_file,
+                'maps_directory': maps_directory,
+                'map_id': map_id,
+                'use_zed': use_zed,
+                'use_apriltag': use_apriltag,
+                'use_keepout': use_keepout,
+                'keepout_mask_file': keepout_mask_file,
+                'localization_backend': localization_backend,
+                'use_rviz': use_rviz,
+                'use_foxglove': use_foxglove,
+                # This wrapper owns the API bridge so it can pass tour_profile.
+                # Keep the core launch override inside this scoped group so it
+                # cannot disable the wrapper-owned bridge below.
+                'use_api': 'false',
+                'initial_pose_x': initial_pose_x,
+                'initial_pose_y': initial_pose_y,
+                'initial_pose_yaw': initial_pose_yaw,
+                'joy_cmd_topic': joy_cmd_topic,
+                'smoothed_cmd_topic': smoothed_cmd_topic,
+                'operator_safety': operator_safety,
+                'use_saved_initial_pose': use_saved_initial_pose,
+                'use_hardware': use_hardware,
+            }.items()
+        )],
     )
     
     # ========== Waypoint Manager GUI ==========
@@ -307,6 +328,7 @@ def generate_launch_description():
         maps_directory_arg,
         map_id_arg,
         use_zed_arg,
+        use_apriltag_arg,
         use_keepout_arg,
         keepout_mask_file_arg,
         localization_backend_arg,

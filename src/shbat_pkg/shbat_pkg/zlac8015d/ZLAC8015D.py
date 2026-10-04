@@ -23,12 +23,12 @@ class Controller:
     Supports velocity control, position control, and odometry feedback.
     """
 
-    def __init__(self, port="/dev/ttyUSB0", baudrate=115200, timeout=1.0):
+    def __init__(self, port="/dev/motor", baudrate=115200, timeout=1.0):
         """
         Initialize the ZLAC8015D controller.
         
         Args:
-            port: Serial port (e.g., '/dev/ttyUSB0')
+            port: Serial port (normally the stable '/dev/motor' udev link)
             baudrate: Communication baudrate (default 115200)
             timeout: Read timeout in seconds
         """
@@ -56,10 +56,13 @@ class Controller:
         # Common
         self.CONTROL_REG = 0x200E
         self.OPR_MODE = 0x200D
+        self.QUICK_STOP_CONTROL = 0x2011
         self.L_ACL_TIME = 0x2080
         self.R_ACL_TIME = 0x2081
         self.L_DCL_TIME = 0x2082
         self.R_DCL_TIME = 0x2083
+        self.L_QUICK_STOP_DCL_TIME = 0x2084
+        self.R_QUICK_STOP_DCL_TIME = 0x2085
 
         # Velocity control
         self.L_CMD_RPM = 0x2088
@@ -241,7 +244,7 @@ class Controller:
         return self.client.write_register(address=self.CONTROL_REG, value=self.DOWN_TIME, device_id=self.ID)
 
     def emergency_stop(self):
-        """Emergency stop - immediate halt."""
+        """Issue the driver's quick-stop command using its configured profile."""
         return self.client.write_register(address=self.CONTROL_REG, value=self.EMER_STOP, device_id=self.ID)
 
     # ==================== FAULT HANDLING ====================
@@ -309,6 +312,43 @@ class Controller:
     def get_decel_time(self):
         """Read the configured left and right deceleration times in ms."""
         registers = self.modbus_fail_read_handler(self.L_DCL_TIME, 2)
+        return registers[0], registers[1]
+
+    def set_quick_stop_mode(self, mode):
+        """Select how control word 0x05 stops the motors.
+
+        Mode 6 uses the dedicated quick-stop deceleration registers, keeping
+        emergency braking independent from the normal motion deceleration.
+        """
+        mode = int(mode)
+        if mode not in (5, 6, 7):
+            raise ValueError('Quick-stop mode must be 5, 6, or 7')
+        return self.client.write_register(
+            address=self.QUICK_STOP_CONTROL,
+            value=mode,
+            device_id=self.ID,
+        )
+
+    def get_quick_stop_mode(self):
+        """Read the configured quick-stop behavior mode."""
+        registers = self.modbus_fail_read_handler(self.QUICK_STOP_CONTROL, 1)
+        return registers[0]
+
+    def set_quick_stop_decel_time(self, L_ms, R_ms):
+        """Set the dedicated left and right quick-stop ramps in milliseconds."""
+        L_ms = max(0, min(32767, int(L_ms)))
+        R_ms = max(0, min(32767, int(R_ms)))
+        return self.client.write_registers(
+            address=self.L_QUICK_STOP_DCL_TIME,
+            values=[L_ms, R_ms],
+            device_id=self.ID,
+        )
+
+    def get_quick_stop_decel_time(self):
+        """Read the dedicated left and right quick-stop ramps in milliseconds."""
+        registers = self.modbus_fail_read_handler(
+            self.L_QUICK_STOP_DCL_TIME, 2
+        )
         return registers[0], registers[1]
 
     # ==================== VELOCITY CONTROL ====================

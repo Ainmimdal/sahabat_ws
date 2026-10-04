@@ -180,7 +180,7 @@ local_costmap:
         z_voxels: 16
         max_obstacle_height: 2.0
         mark_threshold: 0
-        observation_sources: scan point_cloud
+        observation_sources: scan
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -191,17 +191,6 @@ local_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 9.0
           obstacle_min_range: 0.25  # 25cm - ignore robot body/antennas/beams
-        point_cloud:
-          topic: /zed/zed_node/point_cloud/cloud_registered
-          max_obstacle_height: 2.0
-          min_obstacle_height: 0.40  # INCREASED: 40cm min - ignore floor and low objects
-          clearing: True
-          marking: True
-          data_type: "PointCloud2"
-          raytrace_max_range: 5.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 4.0
-          obstacle_min_range: 0.50  # INCREASED: 50cm - ignore robot body completely
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -224,7 +213,7 @@ global_costmap:
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        observation_sources: scan point_cloud
+        observation_sources: scan
         scan:
           topic: /scan
           max_obstacle_height: 2.0
@@ -235,17 +224,6 @@ global_costmap:
           raytrace_min_range: 0.0
           obstacle_max_range: 9.0
           obstacle_min_range: 0.25  # 25cm - ignore robot body/antennas/beams
-        point_cloud:
-          topic: /zed/zed_node/point_cloud/cloud_registered
-          max_obstacle_height: 2.0
-          min_obstacle_height: 0.40  # INCREASED: 40cm min - ignore floor and low objects
-          clearing: True
-          marking: True
-          data_type: "PointCloud2"
-          raytrace_max_range: 5.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 4.0
-          obstacle_min_range: 0.50  # INCREASED: 50cm - ignore robot body completely
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True

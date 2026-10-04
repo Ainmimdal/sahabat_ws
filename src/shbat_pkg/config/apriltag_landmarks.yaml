@@ -1,0 +1,54 @@
+apriltag:
+  ros__parameters:
+    image_transport: raw
+    family: 36h11
+    # FRC 2025 REEFSCAPE: outside edge of the black square, 6.5 in.
+    size: 0.1651
+    max_hamming: 0
+    qos_profile: sensor_data
+    detector:
+      threads: 2
+      decimate: 2.0
+      blur: 0.0
+      refine: true
+      sharpening: 0.25
+      debug: false
+    pose_estimation_method: pnp
+
+apriltag_landmark_manager:
+  ros__parameters:
+    map_frame: map
+    base_frame: base_link
+    camera_frame: zed2i_left_camera_optical_frame
+    family: 36h11
+    tag_size: 0.1651
+    detection_topic: /apriltag/detections
+    minimum_decision_margin: 30.0
+    maximum_hamming: 0
+    detection_timeout: 0.5
+    capture_duration: 2.0
+    capture_minimum_samples: 12
+    capture_max_translation_std: 0.06
+    capture_max_rotation_std: 0.12
+    require_stationary: true
+    stationary_linear_threshold: 0.02
+    stationary_angular_threshold: 0.04
+    auto_initialize: true
+    initialization_minimum_samples: 8
+    initialization_window: 1.5
+    initialization_max_position_std: 0.06
+    initialization_max_yaw_std: 0.10
+    maximum_tag_disagreement_position: 0.25
+    maximum_tag_disagreement_yaw: 0.35
+    # Ignore tags farther than this for startup localization (PnP yaw gets
+    # unreliable on small, distant tags).
+    maximum_initialization_distance: 4.0
+    # Confirm/refine every tag pose with the lidar scan before seeding AMCL.
+    scan_validation: true
+    scan_refine_xy_window: 0.40
+    scan_refine_yaw_window: 0.26
+    scan_minimum_inlier_ratio: 0.55
+    scan_maximum_ambiguity: 0.92
+    scan_retry_interval: 3.0
+    initial_position_stddev: 0.10
+    initial_yaw_stddev: 0.06

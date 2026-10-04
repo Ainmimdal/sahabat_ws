@@ -1,5 +1,11 @@
 <library path="shbat_rviz_plugins">
   <class
+    name="shbat_rviz_plugins/AprilTag Landmarks"
+    type="shbat_rviz_plugins::AprilTagLandmarksPanel"
+    base_class_type="rviz_common::Panel">
+    <description>Record map-fixed AprilTags and initialize AMCL from visible saved tags.</description>
+  </class>
+  <class
     name="shbat_rviz_plugins/Localization Recovery"
     type="shbat_rviz_plugins::LocalizationRecoveryPanel"
     base_class_type="rviz_common::Panel">

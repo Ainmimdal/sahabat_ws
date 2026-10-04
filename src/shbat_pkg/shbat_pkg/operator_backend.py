@@ -200,7 +200,7 @@ class OperatorBackend(Node):
             OccupancyGrid,
             '/map',
             lambda _message: setattr(self, 'last_map', self._now()),
-            1,
+            transient,
             callback_group=self.group,
         )
         self.create_subscription(
@@ -655,13 +655,7 @@ class OperatorBackend(Node):
         message.map_healthy, message.scan_healthy, message.tf_healthy = (
             self._health()
         )
-        if self.localization_backend == 'slam_toolbox':
-            localization_pose_ok = pose_frame == 'map'
-        else:
-            localization_pose_ok = (
-                self.last_amcl_pose > 0.0
-                and self.localization_covariance_good
-            )
+        localization_pose_ok = self._localization_pose_healthy(pose_frame)
         message.localization_healthy = all((
             message.map_healthy,
             message.scan_healthy,
@@ -683,6 +677,15 @@ class OperatorBackend(Node):
             self.localization_recovery_status
         )
         self.status_pub.publish(message)
+
+    def _localization_pose_healthy(self, pose_frame: str) -> bool:
+        """Return whether the selected localization backend has a usable pose."""
+        if self.localization_backend == 'slam_toolbox':
+            return pose_frame == 'map'
+        return (
+            self.last_amcl_pose > 0.0
+            and self.localization_covariance_good
+        )
 
     def _localization_recovery_service(self, request, response):
         if not self._lease_valid(request.lease_id):
@@ -731,7 +734,11 @@ class OperatorBackend(Node):
 
     def _health(self):
         now = self._now()
-        map_healthy = now - self.last_map < 3.0
+        # Nav2's map server publishes a transient-local static map, not a
+        # periodic heartbeat. Once a valid map message has been received it
+        # remains usable; expiring it after three seconds makes localization
+        # permanently unhealthy during normal operation.
+        map_healthy = self.last_map > 0.0
         scan_healthy = now - self.last_scan < 1.0
         try:
             tf_healthy = bool(self.tf_buffer.can_transform(
@@ -1257,6 +1264,8 @@ class OperatorBackend(Node):
         segments,
         settings,
         target_id: str,
+        *,
+        allow_direct_fallback: bool = False,
     ):
         """Resolve a human-approved route from the closest current waypoint."""
         target = next(
@@ -1299,6 +1308,8 @@ class OperatorBackend(Node):
         fallback = str(
             settings.get('direct_fallback', 'warn')
         ).strip().lower()
+        if allow_direct_fallback and fallback == 'reject':
+            fallback = 'warn'
         if fallback == 'reject':
             raise RouteNotFound(
                 f'Preferred route unavailable: {route_error}'
@@ -1411,6 +1422,9 @@ class OperatorBackend(Node):
                         route_segments,
                         route_settings,
                         selected.id,
+                        allow_direct_fallback=(
+                            self.lease_owner == 'sahabot'
+                        ),
                     )
             except (RouteNotFound, TypeError, ValueError) as error:
                 response.message = str(error)

@@ -1,0 +1,60 @@
+name: tests
+revision: 3
+waypoints:
+- id: wp-1
+  name: waypoint_1
+  x: -0.901
+  y: 0.577
+  yaw: -2.439
+  dwell_seconds: 0.0
+  enabled: true
+- id: wp-2
+  name: waypoint_2
+  x: -1.961
+  y: 0.122
+  yaw: -2.136
+  dwell_seconds: 0.0
+  enabled: true
+- id: wp-3
+  name: waypoint_3
+  x: -3.004
+  y: -1.902
+  yaw: 0.88
+  dwell_seconds: 0.0
+  enabled: true
+segments:
+- id: route-1
+  name: wp-1 to wp-2
+  from_waypoint_id: wp-1
+  to_waypoint_id: wp-2
+  bidirectional: true
+  enabled: true
+  via_points:
+  - id: rp-001
+    name: rp-001
+    x: -1.306
+    y: 0.161
+    yaw: 0.926
+    dwell_seconds: 0.0
+    enabled: true
+- id: route-2
+  name: wp-2 to wp-3
+  from_waypoint_id: wp-2
+  to_waypoint_id: wp-3
+  bidirectional: true
+  enabled: true
+  via_points:
+  - id: rp-002
+    name: rp-002
+    x: -2.101
+    y: -0.748
+    yaw: 0.737
+    dwell_seconds: 0.0
+    enabled: true
+  - id: rp-003
+    name: rp-003
+    x: -2.211
+    y: -1.42
+    yaw: 0.232
+    dwell_seconds: 0.0
+    enabled: true

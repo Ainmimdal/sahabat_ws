@@ -10,15 +10,18 @@ from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 import subprocess
 import serial
+from glob import glob
 
 # ============================================================================
 # USB Device Detection Functions
 # ============================================================================
 # Detection Strategy:
-#   1. FTDI (0403:6001):
-#      → Serial A50285BI: Motor (known adapter for ZLAC8015D, skip probe)
-#      → Serial A5069RR4: RPLIDAR S2 (probe for scan data at 115200)
-#   2. CH340 (1a86:7523): Could be Motor RS485 or BNO055 IMU
+#   1. QinHeng CDC ACM (1a86:55d3):
+#      → Serial 5C83118643: Motor controller
+#      → Serial 5C83118549: JUNCTEK battery monitor (never motor-probe)
+#   2. FTDI (0403:6001):
+#      → Serial A5069RR4: RPLIDAR S2
+#   3. CH340 (1a86:7523): Could be Motor RS485 or BNO055 IMU
 #      → Probe Modbus: if responds → Motor
 #      → Probe BNO055: CHIP_ID query → IMU
 #
@@ -219,14 +222,9 @@ def is_hwt901b(port, timeout=0.5):
             pass
         return False
 
-def get_all_ttyusb_ports():
-    """Get list of all available /dev/ttyUSB ports."""
-    ports = []
-    for i in range(10):
-        port = f'/dev/ttyUSB{i}'
-        if os.path.exists(port):
-            ports.append(port)
-    return ports
+def get_all_serial_ports():
+    """Get USB serial ports supported by the robot hardware probes."""
+    return sorted(glob('/dev/ttyUSB*') + glob('/dev/ttyACM*'))
 
 def get_port_info(port):
     """Get USB device info for a serial port."""
@@ -254,11 +252,17 @@ def get_port_serial(port):
 def classify_ports():
     """
     Classify all USB serial ports by their chip type.
-    Returns dict: {'ftdi': [...], 'cp2102': [...], 'ch340': [...], 'other': [...]}
+    Returns a dict grouped by USB serial chipset.
     """
-    classified = {'ftdi': [], 'cp2102': [], 'ch340': [], 'other': []}
+    classified = {
+        'ftdi': [],
+        'cp2102': [],
+        'ch340': [],
+        'qinheng_cdc': [],
+        'other': [],
+    }
     
-    for port in get_all_ttyusb_ports():
+    for port in get_all_serial_ports():
         info = get_port_info(port)
         if 'ID_VENDOR_ID=0403' in info and 'ID_MODEL_ID=6001' in info:
             classified['ftdi'].append(port)
@@ -266,6 +270,8 @@ def classify_ports():
             classified['cp2102'].append(port)
         elif 'ID_VENDOR_ID=1a86' in info and 'ID_MODEL_ID=7523' in info:
             classified['ch340'].append(port)
+        elif 'ID_VENDOR_ID=1a86' in info and 'ID_MODEL_ID=55d3' in info:
+            classified['qinheng_cdc'].append(port)
         else:
             classified['other'].append(port)
     
@@ -279,10 +285,9 @@ def smart_detect_devices():
         tuple: (lidar_port, imu_port, motor_port)
         
     Detection Strategy:
-    1. FTDI (0403:6001):
-       - Serial A50285BI → Motor (known FTDI adapter for ZLAC8015D)
-       - Other FTDI: probe for RPLIDAR S2, then BNO055
-    2. CH340 (1a86:7523):
+    1. QinHeng CDC ACM (1a86:55d3): identify the motor and JUNCTEK by serial
+    2. FTDI (0403:6001): probe for RPLIDAR S2, then BNO055
+    3. CH340 (1a86:7523):
        - Probe Modbus first → Motor
        - Probe BNO055 → IMU
     """
@@ -291,6 +296,18 @@ def smart_detect_devices():
     lidar_port = None
     imu_port = None
     motor_port = None
+
+    # --- QinHeng CDC ACM adapters: identical chipset, unique serials ---
+    for port in classified['qinheng_cdc']:
+        port_serial = get_port_serial(port)
+        if port_serial == '5C83118549':
+            print(f"  Skipping {port}: JUNCTEK battery monitor ({port_serial})")
+        elif port_serial == '5C83118643' and motor_port is None:
+            motor_port = port
+            print(f"  Motor: {port} (known QinHeng serial {port_serial})")
+        elif motor_port is None and is_zlac8015d_motor(port):
+            motor_port = port
+            print(f"  Motor: {port} (Modbus OK)")
     
     # --- FTDI devices: probe to identify ---
     ftdi_ports = classified['ftdi']
@@ -393,20 +410,16 @@ def smart_detect_devices():
     # Fallback for motor if not detected
     if not motor_port:
         print("  Trying Modbus probe for motor...")
-        for port in get_all_ttyusb_ports():
+        for port in get_all_serial_ports():
+            if get_port_serial(port) == '5C83118549':
+                continue
             if port != lidar_port and port != imu_port:
                 if is_zlac8015d_motor(port):
                     motor_port = port
                     print(f"✓ Detected Motor via Modbus: {port}")
                     break
         if not motor_port:
-            all_ports = get_all_ttyusb_ports()
-            if all_ports:
-                motor_port = all_ports[0]
-                print(f"⚠ Motor port not detected — using fallback: {motor_port}")
-            else:
-                motor_port = '/dev/ttyUSB0'
-                print(f"⚠ No serial ports found — using default: {motor_port}")
+            print("✗ Motor port not detected; refusing to assign an unverified serial device")
     
     # Report final status
     print(f"\n  Final assignments:")
@@ -501,7 +514,7 @@ def generate_launch_description():
     # Motor controller port argument
     motor_port_arg = DeclareLaunchArgument(
         'motor_port',
-        default_value=motor_port if motor_port else '/dev/ttyUSB0',
+        default_value=motor_port if motor_port else '/dev/motor',
         description='Serial port for ZLAC8015D motor controller'
     )
     motor_port_config = LaunchConfiguration('motor_port')
@@ -677,7 +690,8 @@ def generate_launch_description():
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},  # Odometry topic name
             {'accel_time_ms': 200},
-            {'decel_time_ms': 200},
+            {'decel_time_ms': 500},
+            {'quick_stop_decel_time_ms': 10},
             {'max_linear_vel': 1.0},       # m/s
             {'max_angular_vel': 2.0},      # rad/s
             {'cmd_vel_timeout': 0.5},      # seconds

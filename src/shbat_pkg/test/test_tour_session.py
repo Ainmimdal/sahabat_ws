@@ -86,6 +86,24 @@ def test_narration_events_wait_for_acceptance_and_confirmed_arrival():
     assert session.current_exhibit == ''
 
 
+def test_previous_completion_cannot_fail_a_new_pending_goal():
+    """Ignore a repeated completion until the new goal is accepted."""
+    session = TourSession(profile='test', arrival_tolerance_m=0.5)
+    session.configure(
+        'dummy', 'two', [waypoint(1, x=1.0), waypoint(2, x=10.0)]
+    )
+    session.update_pose(1.0, 0.0)
+    session.prepare_navigation(session.resolve_station('station-2'), now=2.0)
+
+    assert session.observe_navigation_state('complete', now=2.1) is None
+    assert session.state == 'goal_pending'
+    assert session.target.station_id == 'station-2'
+
+    started = session.observe_navigation_state('navigating', now=2.2)
+    assert started['type'] == 'navigation_started'
+    assert session.state == 'navigating'
+
+
 def test_almost_there_is_once_and_short_trips_skip_it():
     """Emit useful progress speech once and omit it on short journeys."""
     session = TourSession(profile='test')

@@ -203,6 +203,45 @@ remembers the selected voice and reapplies it when the app reconnects. Mason is
 the default voice. The default cache limit is 512 MB and can be changed with
 `TTS_CACHE_MAX_MB`.
 
+### Browser operator console
+
+**Sahabat Waypoint Editor Live** also starts `web_console`, a browser version of
+the RViz waypoint editor. Open `http://<robot-ip>:8088/` from any device on the
+robot's network. Nothing needs to be installed on the client.
+
+- Map view: map, robot pose, filtered lidar, global plan, waypoints, routes,
+  dock, and saved AprilTags. Tools: pose estimate, Nav goal, and add/drag/rotate
+  waypoints.
+- Tabs: waypoint sets/editing/patrol/dock, joystick or WASD teleop, AprilTag
+  capture and tag/global relocalization, and map loading.
+- **Take control** acquires the `/operator/control_lease` for that browser.
+  The lease is released 3 s after the browser stops sending heartbeats, and the
+  backend stops teleop 0.25 s after the last drive command. While the browser
+  holds the lease, RViz panel actions that need a lease are refused.
+- The header E-STOP (or the space bar) latches `/emergency_stop` without needing
+  control. Clearing it requires control and a confirmation.
+- Preferred routes are displayed and preserved on save but are still edited in
+  RViz.
+- The dial at the top right of the map rotates only the view; saved map and pose
+  data are unchanged. Drag it to rotate freely, with soft detents every 15°
+  (hold Shift to disable them). Scroll on it for 1° steps (0.1° with Shift), and
+  click it to reset to 0°.
+- The Localize tab shows the ZED left image (`camera_topic`, default
+  `/zed/zed_node/left/image_rect_color`) as MJPEG with `/apriltag/detections`
+  outlines. The overlay shows the tag ID, decision margin, and camera fps. The
+  image is subscribed and encoded only while a browser is viewing it, at up to
+  `camera_fps` (15, matching the ZED grab rate) and `camera_width` 960. Each
+  encoded frame takes about 16 ms on the Jetson. Each browser can choose Smooth
+  (15 fps) or Data saver (5 fps) for slow links.
+
+Options: `ros2 run shbat_pkg live_waypoint_editor --no-rviz` runs the browser
+console only. `--no-web` disables it, and `--web-port N` changes the port.
+To start it on its own: `ros2 run shbat_pkg web_console --ros-args -p port:=8088`.
+
+The console has **no authentication** and binds to all interfaces. Use it only
+on a trusted private network until access control (for example Tailscale plus a
+login) is added.
+
 ### Preferred routes and doorway approaches
 
 Waypoint sets may contain a sparse graph of human-approved `segments`. Each
@@ -284,7 +323,9 @@ Route settings support:
   exists. Use this only after every expected origin, including the dock, has
   been connected and physically tested.
 
-ZED and remote visualization remain opt-in:
+The production launch enables the ZED AprilTag image stream by default. It is
+not a Nav2 obstacle source; filtered LiDAR `/scan` remains the sole costmap
+observation. Remote visualization remains opt-in:
 
 ```bash
 ros2 launch shbat_pkg operations.launch.py \
@@ -356,9 +397,16 @@ reintroducing the low-angular-command drivetrain deadlock.
 
 The July 31 gallery candidate changes the cruise to 0.42 m/s, uses
 SmacPlanner2D plus collision-checked path smoothing, pivots only above 0.6 rad,
-and accepts 0.10 m / 0.12 rad final pose error. These values are not yet a
-physical baseline. The command arbiter must be the sole normal `/cmd_vel`
-publisher during this test.
+accepts 0.10 m / 0.12 rad final pose error, and limits normal Nav2 deceleration
+to 0.35 m/s² linear and 1.0 rad/s² angular. The gentler deceleration is meant
+to remove abrupt wheel-speed changes at sharp bends without softening the
+emergency-stop path. The ZLAC8015D normal deceleration ramp is 500 ms, while
+its separately configured quick-stop ramp is 10 ms and is used by the ROS
+emergency-stop callback. Preferred-route navigation uses `RouteFollowPath`,
+which raises the rotate-to-path threshold to 1.2 rad so intermediate route
+points remain continuous via targets; final waypoint orientation is still
+enforced. These values are not yet a physical baseline. The command arbiter
+must be the sole normal `/cmd_vel` publisher during this test.
 
 After changing Nav2 speed or controller tuning, use a clear straight test lane
 with a person beside the emergency stop. Start with a short goal at 0.2 m/s,
@@ -384,12 +432,13 @@ sudo cp /home/sahabat/sahabat_ws/udev/99-sahabat-robot.rules \
   /etc/udev/rules.d/99-sahabat-robot.rules
 sudo udevadm control --reload-rules
 sudo udevadm trigger
-ls -l /dev/junctek
+ls -l /dev/junctek /dev/motor
 ```
 
 If the link does not appear, unplug and reconnect only the KG-F USB adapter,
 then repeat `ls -l /dev/junctek`. The rule is tied to adapter serial
-`5C83118549`, so it does not rename the motor RS485 adapter.
+`5C83118549`; the matching compact motor adapter uses serial `5C83118643` and
+receives the separate `/dev/motor` link.
 
 The canonical hardware launches start the read-only battery node by default.
 It publishes standard ROS battery data plus detailed meter state:
@@ -531,20 +580,75 @@ The commands in `PROJECT_STATUS.md` remain available. The canonical launches
 delegate to those established implementations while the migration is tested on
 the physical robot.
 
-## Automatic localization recovery
+## AprilTag startup localization
 
-The RViz window opened by `operations.launch.py` includes a
-**Localization Recovery** panel. Put the robot somewhere with room to rotate,
-ensure no navigation goal is active, then press **Global Relocalize + Rotate**.
-It spreads AMCL particles over the full map and rotates at 0.25 rad/s until the
-AMCL pose covariance remains good for eight updates. It stops automatically on
-success, after 60 seconds, if lidar data becomes stale, or if E-stop activates.
+Install the standard ROS Humble detector once:
+
+```bash
+sudo apt-get install -y ros-humble-apriltag-ros
+```
+
+The live waypoint-editor RViz window includes an **AprilTag Localization**
+panel on the left. It replaces the default spin-recovery panel. The configured
+tags are family `36h11` with a 0.1651 m (6.5 in.) black-square edge, matching
+the REEFSCAPE printable tags. Measure from the outside edges of the black square,
+not the paper or outer white margin. All physical tags used with the default
+configuration must have that measured edge size.
+
+To add a tag to an existing map:
+
+1. Start the normal live waypoint editor and establish a trustworthy AMCL pose
+   using the lidar or RViz **2D Pose Estimate**.
+2. Keep the robot stationary with the tag visible in the ZED left image.
+3. Select the visible tag ID, give it a useful name, and press **Capture**.
+4. Wait for the panel to report that the stable samples were saved. Saved tags
+   appear as labelled markers on the map.
+
+Flat maps store landmarks in `maps/<map_id>_tags.yaml`; directory maps store
+them in `maps/<map_id>/tags.yaml`. Tag IDs must be unique within a map. Capture
+again to update a tag pose after it has physically moved.
+
+At later startups, when the selected map has saved tags, the dock initializer
+does not assume the robot is at the dock. The landmark manager waits for the
+stationary camera to see a saved, high-quality tag, checks that repeated pose
+estimates agree, and then publishes the resulting pose to `/initialpose` for
+AMCL. It never commands the robot to spin. Put a tag on the wall that the
+camera faces in the desired parked orientation; additional tags around the
+lobby provide coverage wherever the robot is turned. If no saved tag is
+visible, the lidar-confirmed dock fallback below applies; nothing unconfirmed
+is published.
+Use **Localize Now** to repeat the guarded tag localization while a saved tag
+is visible, or launch with `use_apriltag:=false` to disable the feature.
 
 The direct robot gamepad does not require a deadman button. The left stick is
 live whenever E-stop is clear. Button 0 still activates E-stop.
 
-Operations initializes AMCL from the waypoint named `dock` in the configured
-waypoint file. Place the robot at the dock before launch. If it starts away from
-the dock or the lidar points do not align with the displayed map, use the
-recovery button. Use `initialize_from_dock:=false` when intentionally starting
-somewhere else.
+### Startup localization policy (no manual 2D Pose Estimate)
+
+`dock_pose_initializer` and `apriltag_landmark_manager` together localize the
+robot at power-up without motion. Watch `/localization/startup_status` (latched
+String) or the RViz AprilTag panel for the current decision.
+
+1. **AprilTag first.** If the map has saved tags, a visible tag within 4 m
+   gives a coarse pose. The lidar then refines it inside ±0.40 m / ±15° and
+   must confirm it (≥55 % of beams on mapped walls, unambiguous) before
+   `/initialpose` is published. A moved tag is therefore rejected instead of
+   corrupting localization.
+2. **Dock + lidar fallback.** If no tag localizes the robot within 25 s (or
+   the map has no tags), the lidar scan is matched against the map inside
+   ±0.75 m / ±35° of the map's `dock` waypoint. The robot only needs to be
+   *roughly* on the dock. Rejected matches retry every 5 s (visitors blocking
+   the lidar are the usual cause); the robot stays unlocalized rather than
+   being given a guess.
+3. **Manual** 2D Pose Estimate remains available and ends the startup logic.
+
+Requirements per map: capture a waypoint named `dock` in the waypoint editor
+(`maps/waypoint_sets/<map_id>/dock.yaml`) and, optionally, AprilTags. Tag
+captures are refused unless the lidar confirms the current AMCL pose.
+Use `initialize_from_dock:=false` when intentionally starting elsewhere; set
+the node parameter `refine_with_scan:=false` only to restore the old blind
+dock-pose behaviour.
+
+The ZED grabs at HD720 (depth disabled) for longer tag range. Revert
+`general.grab_resolution` to `VGA` in `slam_nav_launch.py` if CPU load on the
+Orin is a problem.
