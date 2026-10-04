@@ -4,7 +4,9 @@
   Compute an initial path, then recompute when the goal changes, the path
   becomes invalid, or the current path is twenty seconds old. Recovery for an
   ordinary goal remains stationary: clear costmaps, wait briefly, then fail
-  instead of automatically spinning or backing up.
+  instead of automatically spinning or backing up. If the smoothed path would
+  collide, keep following the planner's raw path rather than aborting the
+  goal: SmoothPath only writes {path} on success.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -23,13 +25,15 @@
                 <IsPathValid path="{path}"/>
               </ReactiveSequence>
               <Sequence name="ComputeAndSmoothPath">
-                <ComputePathToPose goal="{goal}" path="{raw_path}" planner_id="GridBased"/>
-                <SmoothPath
-                  unsmoothed_path="{raw_path}"
-                  smoothed_path="{path}"
-                  smoother_id="simple_smoother"
-                  max_smoothing_duration="0.5"
-                  check_for_collisions="true"/>
+                <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+                <ForceSuccess>
+                  <SmoothPath
+                    unsmoothed_path="{path}"
+                    smoothed_path="{path}"
+                    smoother_id="simple_smoother"
+                    max_smoothing_duration="0.5"
+                    check_for_collisions="true"/>
+                </ForceSuccess>
               </Sequence>
             </Fallback>
             <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
