@@ -103,6 +103,7 @@ setup(
             'base_controller = shbat_pkg.base_controller:main',
             'test_motor = shbat_pkg.test_motor:main',
             'scan_filter = shbat_pkg.scan_filter:main',
+            'scan_mask_tuner = shbat_pkg.scan_mask_tuner:main',
             'waypoint_patrol = shbat_pkg.waypoint_patrol:main',
             'waypoint_collector = shbat_pkg.waypoint_collector:main',
             'waypoint_panel = shbat_pkg.waypoint_panel:main',

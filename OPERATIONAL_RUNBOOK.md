@@ -588,6 +588,20 @@ ros2 topic hz /scan_raw
 ros2 topic hz /scan
 ```
 
+To tune the rear blind-zone mask, keep the LIDAR check running and open the
+mask tuner. It only subscribes to `/scan_raw`, draws it in the robot frame
+(front up) with the masked sector shaded, and lists the nearest return for
+±3° around each mask edge. Returns closer than 0.40 m that the mask keeps are
+shown in orange because they are usually the robot body. Widen the view one
+degree at a time, stop before body returns appear, then **Save** writes only
+the `filter_zones` line in `config/scan_filter.yaml`. Restart the scan filter
+to apply it. Changing the mask alters Nav2 and AMCL input, so treat it as a
+sensor change and recheck wall alignment before the next motion test.
+
+```bash
+ros2 run shbat_pkg scan_mask_tuner
+```
+
 To distinguish a scan-mode problem from a hardware-health problem, retry using
 the standard mode:
 
