@@ -238,6 +238,16 @@ Options: `ros2 run shbat_pkg live_waypoint_editor --no-rviz` runs the browser
 console only. `--no-web` disables it, and `--web-port N` changes the port.
 To start it on its own: `ros2 run shbat_pkg web_console --ros-args -p port:=8088`.
 
+**Mapping from the browser:** the **Sahabat New Mapping (Web Console)** shortcut
+(`ros2 run shbat_pkg web_mapping`) runs `navigation.launch.py mode:=mapping`
+plus `operator_backend` and `web_console`, without RViz or the Tk panel (add
+`--rviz` / `--panel` to get them). Drive with the Drive tab after taking
+control, then save from the **Map** tab. Files are written exactly like
+the mapping panel writes them (`maps/<name>.yaml/.pgm` and the editable session
+`.posegraph/.data`). Reusing a name first moves the old files to
+`maps/.archive/<name>-<timestamp>/`. The original **Sahabat New Mapping**
+shortcut is unchanged.
+
 The console has **no authentication** and binds to all interfaces. Use it only
 on a trusted private network until access control (for example Tailscale plus a
 login) is added.

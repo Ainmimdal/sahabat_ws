@@ -46,3 +46,17 @@ def test_hub_replays_latest_state_to_new_clients():
     assert not any('"n":1' in event for event in events)
     hub.unsubscribe(client)
     assert client not in hub.clients
+
+
+@pytest.mark.parametrize('name', ['gallery_oct', 'lab-2', 'A1'])
+def test_map_names_accepted(name):
+    """Map names become file stems under maps/."""
+    from shbat_pkg.web_console import VALID_MAP_NAME
+    assert VALID_MAP_NAME.fullmatch(name)
+
+
+@pytest.mark.parametrize('name', ['', '../x', 'a b', '_lead', 'x/y', 'm.yaml'])
+def test_map_names_rejected(name):
+    """Reject names that could escape the maps folder or break file stems."""
+    from shbat_pkg.web_console import VALID_MAP_NAME
+    assert not VALID_MAP_NAME.fullmatch(name)

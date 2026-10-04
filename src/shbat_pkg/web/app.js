@@ -26,6 +26,7 @@ const S = {
   scan: null, plan: null,
   tags: null, startup: '',
   lease: { held: false, client: '' },
+  mapping: { active: false, saving: '' },
   server: null,          // last waypoints payload from robot
   draft: [],             // editable waypoint copy
   dirty: false,
@@ -95,6 +96,7 @@ function connect() {
       S.map = d; S.mapImg = img; S.mapBounds = knownBounds(img, d);
       if (first) fitMap();
       draw();
+      renderMapping();
     };
     img.src = `api/map.png?v=${d.version}`;
   });
@@ -104,6 +106,12 @@ function connect() {
   on('startup', (d) => { S.startup = d.text; renderPanels(); });
   on('lease', (d) => { S.lease = d; renderHeader(); renderPanels(); });
   on('waypoints', onWaypoints);
+  on('mapping', (d) => {
+    const started = d.active && !S.mapping.active;
+    S.mapping = d;
+    renderHeader(); renderMapping();
+    if (started) { document.querySelector('[data-tab="mapping"]').click(); loadMapFiles(); }
+  });
 }
 
 setInterval(() => {
@@ -124,7 +132,8 @@ function renderHeader() {
     chip($('chip-nav'), st.operation ? `${st.navigation_state}: ${st.operation}` : st.navigation_state,
       st.navigation_state === 'failed' ? 'bad' : '');
     const localized = st.localized && st.frame === 'map';
-    chip($('chip-loc'), localized ? 'Localized' : 'Not localized', localized ? 'ok' : 'warn');
+    if (S.mapping.active) chip($('chip-loc'), 'Mapping', 'ok');
+    else chip($('chip-loc'), localized ? 'Localized' : 'Not localized', localized ? 'ok' : 'warn');
     chip($('chip-scan'), st.scan_ok ? 'Lidar' : 'Lidar down', st.scan_ok ? 'ok' : 'bad');
     chip($('chip-motor'), st.motor_enabled ? 'Motors on' : 'Motors off', st.motor_enabled ? 'ok' : 'warn');
     const b = st.battery;
@@ -826,6 +835,7 @@ document.querySelectorAll('[data-tab]').forEach((b) => {
     document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== b.dataset.tab));
     if (b.dataset.tab === 'system') loadMaps();
+    if (b.dataset.tab === 'mapping') { loadMapFiles(); renderMapping(); }
     store('sahabat.tab', b.dataset.tab);
   };
 });
@@ -852,6 +862,67 @@ $('map-load').onclick = async () => {
   if (await dialog({ title: `Load map “${id}”?`, text: 'The robot must be stationary. You will need to localize again afterwards.', okText: 'Load' })) {
     safe(cmd('load_map', { map_id: id }));
   }
+};
+
+// ------------------------------------------------------------------ mapping
+function renderMapping() {
+  const m = S.mapping;
+  const el = $('mapping-state');
+  if (m.saving) {
+    el.className = 'notice warn'; el.textContent = `Saving map “${m.saving}”…`;
+  } else if (m.active) {
+    el.className = 'notice ok'; el.textContent = 'SLAM mapping is running. Drive the robot to build the map.';
+  } else {
+    el.className = 'notice'; el.textContent = 'Not mapping. Start the “Sahabat New Mapping (Web Console)” shortcut on the robot to build a new map.';
+  }
+  const map = S.map;
+  const b = S.mapBounds;
+  kv($('mapping-kv'), [
+    ['Live map', map ? `${(map.width * map.resolution).toFixed(1)} × ${(map.height * map.resolution).toFixed(1)} m grid` : '—'],
+    ['Mapped area', b ? `${(b.x1 - b.x0).toFixed(1)} × ${(b.y1 - b.y0).toFixed(1)} m` : '—'],
+    ['Resolution', map ? `${map.resolution.toFixed(2)} m/cell` : '—'],
+    ['Folder', m.directory || '—'],
+  ]);
+  $('map-save').disabled = !m.active || !!m.saving;
+}
+
+async function loadMapFiles() {
+  try {
+    const r = await cmd('list_map_files', {}, true);
+    const body = $('maps-body');
+    body.innerHTML = '';
+    for (const m of r.maps) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td></td><td></td><td class="muted"></td>';
+      tr.children[0].textContent = m.id;
+      tr.children[1].textContent = m.session ? 'yes' : '—';
+      tr.children[2].textContent = new Date(m.modified * 1000).toLocaleString();
+      tr.onclick = () => { $('map-name').value = m.id; };
+      body.appendChild(tr);
+    }
+    if (!r.maps.length) body.innerHTML = '<tr><td colspan="3" class="muted">No saved maps.</td></tr>';
+  } catch (_e) { /* console offline */ }
+}
+
+$('map-save').onclick = async () => {
+  const name = $('map-name').value.trim();
+  let check;
+  try { check = await cmd('map_name_check', { name }, true); } catch (e) { return toast(e.message, 'err'); }
+  let overwrite = false;
+  if (check.existing.length) {
+    overwrite = await dialog({
+      title: `Replace map “${name}”?`,
+      text: `These files exist: ${check.existing.join(', ')}. They will be moved to maps/.archive, not deleted. Waypoint sets and AprilTags for this map stay in place but may no longer line up with the new map.`,
+      okText: 'Replace', danger: true,
+    });
+    if (!overwrite) return;
+  }
+  $('map-save').disabled = true;
+  try {
+    await cmd('save_map', { name, overwrite, session: $('map-session').checked });
+    loadMapFiles();
+  } catch (_e) { /* toast shown */ }
+  renderMapping();
 };
 
 // ------------------------------------------------------------------- teleop
@@ -1024,4 +1095,5 @@ document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click
 const savedTab = store('sahabat.tab');
 if (savedTab) document.querySelector(`[data-tab="${savedTab}"]`)?.click();
 setTool('pan');
+renderMapping();
 connect();

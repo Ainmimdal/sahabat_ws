@@ -63,6 +63,7 @@
       <button data-tab="waypoints" class="tab active">Waypoints</button>
       <button data-tab="drive" class="tab">Drive</button>
       <button data-tab="localize" class="tab">Localize</button>
+      <button data-tab="mapping" class="tab">Map</button>
       <button data-tab="system" class="tab">System</button>
     </nav>
 
@@ -172,6 +173,33 @@
       <div class="row">
         <button class="btn small" id="tags-reload">Reload tag file</button>
       </div>
+    </div>
+
+    <div class="panel hidden" data-panel="mapping">
+      <div id="mapping-state" class="notice"></div>
+      <div class="kv" id="mapping-kv"></div>
+      <h3>Save map</h3>
+      <div class="row">
+        <label class="grow">Map name
+          <input id="map-name" type="text" placeholder="e.g. gallery_oct" autocomplete="off" spellcheck="false">
+        </label>
+        <button class="btn small primary" id="map-save">Save map</button>
+      </div>
+      <div class="row">
+        <label class="check"><input id="map-session" type="checkbox" checked> Also save editable session (recommended)</label>
+      </div>
+      <p class="muted small">Saves <code>&lt;name&gt;.yaml/.pgm</code> for navigation and <code>.posegraph/.data</code> so the session can be continued later. If you reuse a name, the old files are moved to <code>maps/.archive</code> first. You can save more than once while mapping.</p>
+      <h3>Tips</h3>
+      <ul class="tips small muted">
+        <li>Drive slowly and smoothly. Turn in place gently.</li>
+        <li>Keep walls in lidar range, and revisit the start area to close loops.</li>
+        <li>Save before stopping the launcher. The live map is lost on exit.</li>
+      </ul>
+      <h3>Saved maps</h3>
+      <table class="tags">
+        <thead><tr><th>Name</th><th>Session</th><th>Saved</th></tr></thead>
+        <tbody id="maps-body"></tbody>
+      </table>
     </div>
 
     <div class="panel hidden" data-panel="system">

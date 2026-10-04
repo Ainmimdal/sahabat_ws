@@ -18,6 +18,8 @@ WARNING: there is no authentication. Bind to a trusted network only.
 
 import collections
 import json
+import re
+import shutil
 import math
 import queue
 import struct
@@ -65,6 +67,9 @@ from sahabat_interfaces.srv import (
     SetEmergencyStop,
 )
 from sensor_msgs.msg import Image, LaserScan
+from slam_toolbox.srv import SaveMap as SlamSaveMap
+from slam_toolbox.srv import SerializePoseGraph
+from std_msgs.msg import String as StringMsg
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
@@ -76,6 +81,8 @@ MODE_NAMES = {
     OperatorStatus.MODE_OPERATIONS: 'operations',
 }
 DIAG_NAMES = {0: 'ok', 1: 'warn', 2: 'error'}
+VALID_MAP_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
+MAP_FILE_SUFFIXES = ('.yaml', '.pgm', '.posegraph', '.data')
 HEARTBEAT_TIMEOUT = 3.0
 MAX_SCAN_POINTS = 720
 
@@ -365,6 +372,7 @@ class WebConsole(Node):
         self.declare_parameter('port', 8088)
         self.declare_parameter('web_root', '')
         self.declare_parameter('scan_rate', 5.0)
+        self.declare_parameter('maps_directory', '~/sahabat_ws/maps')
         self.declare_parameter(
             'camera_topic', '/zed/zed_node/left/image_rect_color')
         self.declare_parameter('camera_fps', 15.0)
@@ -454,6 +462,17 @@ class WebConsole(Node):
             int(self.get_parameter('camera_width').value),
         )
 
+        self.maps_directory = Path(
+            str(self.get_parameter('maps_directory').value)).expanduser()
+        self.slam_save = self.create_client(
+            SlamSaveMap, '/slam_toolbox/save_map', callback_group=self.group)
+        self.slam_serialize = self.create_client(
+            SerializePoseGraph, '/slam_toolbox/serialize_map',
+            callback_group=self.group)
+        self.mapping_active = None
+        self.map_saving = ''
+        self.create_timer(2.0, self._mapping_timer, callback_group=self.group)
+
         self.graph_refresh_pending = threading.Event()
         self.create_timer(1.0, self._lease_timer, callback_group=self.group)
         self.create_timer(0.5, self._graph_timer, callback_group=self.group)
@@ -529,8 +548,17 @@ class WebConsole(Node):
         previous_map = self.active_map
         self.active_map = message.active_map
         battery = message.battery_percentage
+        frame = message.header.frame_id
+        x, y, yaw = message.pose.x, message.pose.y, message.pose.theta
+        if frame != 'map':
+            # During SLAM mapping the backend has no active map and reports
+            # odom; SLAM still publishes map->odom, so show the map pose.
+            pose = self._transform_2d('map', 'base_link')
+            if pose is not None:
+                frame = 'map'
+                x, y, yaw = pose
         self.hub.publish('status', {
-            'frame': message.header.frame_id,
+            'frame': frame,
             'mode': MODE_NAMES.get(message.mode, str(message.mode)),
             'active_map': message.active_map,
             'navigation_state': message.navigation_state,
@@ -538,9 +566,9 @@ class WebConsole(Node):
             'motor_enabled': message.motor_enabled,
             'control_owner': message.control_owner,
             'battery': None if not math.isfinite(battery) else round(battery, 1),
-            'x': message.pose.x,
-            'y': message.pose.y,
-            'yaw': message.pose.theta,
+            'x': x,
+            'y': y,
+            'yaw': yaw,
             'linear': message.linear_velocity,
             'angular': message.angular_velocity,
             'map_ok': message.map_healthy,
@@ -946,6 +974,111 @@ class WebConsole(Node):
         if not result.success:
             raise RuntimeError(result.message)
         return result.message
+
+    # --------------------------------------------------------------- mapping
+    def _mapping_timer(self) -> None:
+        active = self.slam_save.service_is_ready()
+        if active != self.mapping_active:
+            self.mapping_active = active
+            self._publish_mapping()
+
+    def _publish_mapping(self) -> None:
+        self.hub.publish('mapping', {
+            'active': bool(self.mapping_active),
+            'saving': self.map_saving,
+            'directory': str(self.maps_directory),
+        })
+
+    def _existing_map_files(self, name: str):
+        stem = self.maps_directory / name
+        return [stem.with_suffix(suffix) for suffix in MAP_FILE_SUFFIXES
+                if stem.with_suffix(suffix).exists()]
+
+    def op_map_name_check(self, cmd, _client):
+        name = str(cmd.get('name', '')).strip()
+        if not VALID_MAP_NAME.fullmatch(name):
+            raise ValueError(
+                'Use letters, numbers, hyphens and underscores (max 64)')
+        return {'existing': [p.name for p in self._existing_map_files(name)]}
+
+    def op_save_map(self, cmd, client):
+        """Save the live SLAM map like mapping_control_panel does.
+
+        Files land at <maps_directory>/<name>.{yaml,pgm} plus the editable
+        session <name>.{posegraph,data}. Replaced files are first moved to
+        <maps_directory>/.archive/<name>-<timestamp>/.
+        """
+        self._require_lease(client)
+        name = str(cmd.get('name', '')).strip()
+        if not VALID_MAP_NAME.fullmatch(name):
+            raise ValueError(
+                'Use letters, numbers, hyphens and underscores (max 64)')
+        if self.map_saving:
+            raise RuntimeError(f'Already saving {self.map_saving}')
+        if not self.slam_save.service_is_ready():
+            raise RuntimeError('SLAM mapping is not running')
+        existing = self._existing_map_files(name)
+        if existing and not cmd.get('overwrite'):
+            raise RuntimeError(f'Map {name} already exists')
+        self.map_saving = name
+        self._publish_mapping()
+        try:
+            self.maps_directory.mkdir(parents=True, exist_ok=True)
+            archived = ''
+            if existing:
+                archive = (self.maps_directory / '.archive'
+                           / f'{name}-{time.strftime("%Y%m%d-%H%M%S")}')
+                archive.mkdir(parents=True)
+                for path in existing:
+                    shutil.move(str(path), str(archive / path.name))
+                archived = f'; previous files moved to {archive}'
+            stem = self.maps_directory / name
+            request = SlamSaveMap.Request()
+            request.name = StringMsg(data=str(stem))
+            result = self._call_slam(self.slam_save, request, 30.0)
+            if result.result != SlamSaveMap.Response.RESULT_SUCCESS:
+                raise RuntimeError(
+                    f'SLAM map save failed (result {result.result})')
+            if cmd.get('session', True):
+                request = SerializePoseGraph.Request()
+                request.filename = str(stem)
+                result = self._call_slam(self.slam_serialize, request, 60.0)
+                if result.result != SerializePoseGraph.Response.RESULT_SUCCESS:
+                    raise RuntimeError(
+                        'Map saved, but the editable session failed '
+                        f'(result {result.result})')
+            saved = ', '.join(p.name for p in self._existing_map_files(name))
+            return f'Saved {saved}{archived}'
+        finally:
+            self.map_saving = ''
+            self._publish_mapping()
+
+    @staticmethod
+    def _call_slam(client, request, timeout: float):
+        if not client.wait_for_service(timeout_sec=1.0):
+            raise RuntimeError(f'{client.srv_name} is unavailable')
+        future = client.call_async(request)
+        done = threading.Event()
+        future.add_done_callback(lambda _f: done.set())
+        if not done.wait(timeout):
+            future.cancel()
+            raise RuntimeError(f'{client.srv_name} timed out')
+        return future.result()
+
+    def op_list_map_files(self, _cmd, _client):
+        maps = []
+        for path in sorted(self.maps_directory.glob('*.yaml')):
+            if path.name.endswith(('_waypoints.yaml', '.metadata.yaml')):
+                continue
+            if not path.with_suffix('.pgm').exists():
+                continue
+            maps.append({
+                'id': path.stem,
+                'session': path.with_suffix('.posegraph').exists(),
+                'modified': path.stat().st_mtime,
+            })
+        maps.sort(key=lambda item: item['modified'], reverse=True)
+        return {'maps': maps}
 
     def op_refresh(self, _cmd, _client):
         self.refresh_graph()

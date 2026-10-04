@@ -202,6 +202,15 @@ select.auto { width: auto; }
   background: var(--accent); box-shadow: var(--shadow); pointer-events: none;
 }
 
+.notice {
+  padding: 8px 10px; border-radius: 8px; margin-bottom: 10px; font-size: 13px;
+  background: var(--surface-2); border: 1px solid var(--border);
+}
+.notice.ok { border-color: var(--ok); color: var(--ok); }
+.notice.warn { border-color: var(--warn); color: var(--warn); }
+.tips { margin: 0; padding-left: 18px; }
+.tips li { margin-bottom: 3px; }
+code { font: 12px ui-monospace, monospace; }
 table.tags { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
 table.tags th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 4px; }
 table.tags td { padding: 4px; border-top: 1px solid var(--border); }
