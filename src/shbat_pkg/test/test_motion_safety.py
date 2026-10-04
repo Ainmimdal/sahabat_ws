@@ -218,7 +218,11 @@ def test_nav2_uses_rotation_shim_over_dwb_with_lidar_safe_motion_limits():
     assert planner['smooth_path'] is False
     assert smoother_parameters['max_velocity'] == [0.5, 0.0, 0.5]
     assert smoother_parameters['min_velocity'] == [-0.3, 0.0, -0.5]
-    assert smoother_parameters['max_accel'] == [0.6, 0.0, 3.0]
+    # Gentle build-up for the slow drive; prompt braking is unchanged.
+    assert smoother_parameters['max_accel'] == [0.3, 0.0, 0.8]
+    assert controller['acc_lim_x'] == smoother_parameters['max_accel'][0]
+    # Scaling axes together would slave pivot braking to the linear ramp.
+    assert smoother_parameters['scale_velocities'] is False
     assert smoother_parameters['feedback'] == 'OPEN_LOOP'
     assert smoother_parameters['max_decel'] == [-0.35, 0.0, -3.0]
 

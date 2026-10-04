@@ -491,6 +491,19 @@ wheel `vyaw` as a low-weight fallback; the launch files give the gyro a
 calibration bags through the new EKF cut the error from 26–29° to 0.1–1.5° per
 turn with no measurable drift at rest.
 
+The drive follows commands late. In the 2026-10-05 navigation bags a wheel
+needed 0.7–0.9 s to follow a speed-up and 1.0–1.4 s (worst over 4 s) to slow
+down or reverse, measured from `/cmd_vel` (after Nav2) to `/wheel_odom`. At a
+pivot-to-drive hand-over the reversing wheel lagged while the other sped up, so
+the robot spun the wrong way at up to 0.9 rad/s and DWB over-corrected. The
+velocity smoother therefore builds speed gently (0.3 m/s², 0.8 rad/s²), still
+brakes promptly (−0.35 m/s², −3.0 rad/s²), and limits each axis independently
+(`scale_velocities: False`) so pivot braking is not slowed by the linear ramp.
+DWB keeps `acc_lim_theta: 3.0` because its sampling window must reach the 0.15
+rad/s stiction speed in one 20 Hz cycle. Why the drive is 2–5× slower than its
+200 ms / 500 ms ramp settings is still open; investigating it needs a motor test
+plan.
+
 To re-check heading after any IMU, wheel or EKF change, record a spin
 calibration: with a tape mark under the robot's front edge and walls in lidar
 view, run `record_nav_test.sh spin_calibration`, turn exactly one full turn in
