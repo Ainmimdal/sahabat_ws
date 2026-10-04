@@ -125,11 +125,11 @@ controller_server:
       debug_trajectory_details: false
       min_vel_x: 0.0
       min_vel_y: 0.0
-      max_vel_x: 0.4               # Enough to cross the carpet transition
+      max_vel_x: 0.5               # Up to the smoother and base_controller caps
       max_vel_y: 0.0               # Differential drive cannot move laterally
       max_vel_theta: 0.5           # Lidar-safe limit for the 10 Hz scan rate
       min_speed_xy: 0.01
-      max_speed_xy: 0.4
+      max_speed_xy: 0.5
       # Commands below ~0.056 rad/s truncate to 0 RPM in the integer motor
       # interface, and 0.10 rad/s still becomes only 1 RPM. Use ~2 RPM so
       # side/behind-goal turns reliably overcome drivetrain stiction.

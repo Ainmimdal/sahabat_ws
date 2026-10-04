@@ -524,6 +524,12 @@ loss, localization recovery and mode or map changes still stop remote driving
 immediately. Commands without any ramp (the 0.5 s command watchdog, arbiter
 source switches) start and stop sharply. The E-stop quick stop stays at 10 ms.
 
+With short ramps the robot moved well, so DWB now cruises at up to 0.5 m/s,
+the same as the velocity smoother and `base_controller` caps; going faster needs
+those caps raised too. An `amcl_check` bag with five 110–215° pivots showed AMCL
+moved the heading by only 0.5–1.6° per pivot (no single update over 0.6°), so
+the planned AMCL scan gate was not needed.
+
 Short-ramp test (person beside the E-stop): drive slowly by joystick first and
 stop if starts or stops jerk or a wheel slips; then record
 `record_nav_test.sh short_ramps` with a goal ahead and a goal behind. The

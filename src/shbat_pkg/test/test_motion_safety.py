@@ -197,7 +197,9 @@ def test_nav2_uses_rotation_shim_over_dwb_with_lidar_safe_motion_limits():
         controller['angular_disengage_threshold']
         < controller['angular_dist_threshold']
     )
-    assert controller['max_vel_x'] == 0.4
+    assert controller['max_vel_x'] == 0.5
+    # Never above the smoother cap that the drive actually receives.
+    assert controller['max_vel_x'] <= smoother_parameters['max_velocity'][0]
     assert controller['max_vel_y'] == 0.0
     assert controller['max_vel_theta'] == 0.5
     assert controller['min_speed_theta'] == 0.15
