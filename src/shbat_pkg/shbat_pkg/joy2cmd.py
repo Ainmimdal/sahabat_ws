@@ -114,6 +114,13 @@ class Joy2CmdNode(Node):
         self.last_angular_cmd = 0.0
         self.last_cmd_time = self.get_clock().now()
 
+        # If /joy goes quiet (controller unplugged or out of range) while the
+        # robot is still moving, keep ramping down from this timer instead of
+        # freezing on the last command until the arbiter times it out.
+        self.last_joy_time = self.get_clock().now()
+        self.joy_silence_timeout = 0.15  # seconds
+        self.create_timer(0.05, self.coast_to_stop)
+
         self.get_logger().info('Joy2Cmd initialized with emergency stop')
         self.get_logger().info(f'  max_linear_speed: {self.max_linear_speed:.3f} m/s')
         self.get_logger().info(f'  max_angular_speed: {self.max_angular_speed:.3f} rad/s')
@@ -165,6 +172,26 @@ class Joy2CmdNode(Node):
 
         return self.last_linear_cmd, self.last_angular_cmd
 
+    def still_moving(self) -> bool:
+        """Return whether the slew-limited command has not reached zero."""
+        return self.last_linear_cmd != 0.0 or self.last_angular_cmd != 0.0
+
+    def coast_to_stop(self):
+        """Continue a ramp-down when /joy messages stop arriving."""
+        if self.emergency_stopped or self.localization_recovery_active:
+            return
+        if not self.still_moving():
+            return
+        silence = (self.get_clock().now() - self.last_joy_time).nanoseconds * 1e-9
+        if silence < self.joy_silence_timeout:
+            return
+        cmd_linear, cmd_angular = self.apply_rate_limit(0.0, 0.0)
+        twist = Twist()
+        twist.linear.x = cmd_linear
+        twist.angular.z = cmd_angular
+        self.publisher_.publish(twist)
+        self.active_pub.publish(Bool(data=self.still_moving()))
+
     def recovery_active_callback(self, msg: Bool):
         """Yield cmd_vel while automatic localization recovery is rotating."""
         self.localization_recovery_active = msg.data
@@ -199,6 +226,7 @@ class Joy2CmdNode(Node):
         self.stop_status_pub.publish(status)
 
     def joy_callback(self, msg: Joy):
+        self.last_joy_time = self.get_clock().now()
         # Initialize previous buttons if needed
         if not self.prev_buttons:
             self.prev_buttons = [0] * len(msg.buttons) if msg.buttons else []
@@ -274,7 +302,11 @@ class Joy2CmdNode(Node):
         twist.linear.x = cmd_linear
         twist.angular.z = cmd_angular
 
-        self.active_pub.publish(Bool(data=(linear_input != 0.0 or angular_input != 0.0)))
+        # Stay the active source until the ramp reaches zero. Reporting
+        # inactive as soon as the stick centred let the arbiter switch away
+        # and cut the ramp-down short, so the robot stopped abruptly.
+        stick_moved = linear_input != 0.0 or angular_input != 0.0
+        self.active_pub.publish(Bool(data=stick_moved or self.still_moving()))
 
         # Publish the Twist message
         self.publisher_.publish(twist)
