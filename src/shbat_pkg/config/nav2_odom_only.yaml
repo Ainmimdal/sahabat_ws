@@ -105,8 +105,8 @@ controller_server:
       primary_controller: "dwb_core::DWBLocalPlanner"
       angular_dist_threshold: 0.6      # ~34 deg; smaller errors stay DWB arcs
       # This Humble build has no braking profile: the shim turns at full rate
-      # until it disengages, then the ZLAC 500 ms decel ramp coasts the robot
-      # ~0.12 rad at 0.5 rad/s. Disengaging at that angle lets it coast into
+      # until it disengages, then the drive's response lag coasts the robot
+      # ~0.12 rad at 0.5 rad/s (measured with the former 500 ms ZLAC ramp). Disengaging at that angle lets it coast into
       # alignment. The 2026-10-05 bag at 0.25 rad handed DWB 10-14 deg of
       # error while still turning, and DWB then weaved +/-20 deg.
       angular_disengage_threshold: 0.12  # ~7 deg, matches the coast angle
@@ -142,7 +142,7 @@ controller_server:
       acc_lim_theta: 3.0
       decel_lim_x: -0.35
       decel_lim_y: 0.0
-      decel_lim_theta: -3.0        # Command braking early; motor still ramps over 500 ms
+      decel_lim_theta: -3.0        # Command braking early
       # Keep the trajectory search small enough for the Jetson to sustain the
       # 20 Hz controller deadline. The former 20 x 40 grid evaluated 819 valid
       # trajectories per cycle and repeatedly missed the deadline.

@@ -447,7 +447,8 @@ SmacPlanner2D plus collision-checked path smoothing, pivots only above 0.6 rad,
 accepts 0.10 m / 0.12 rad final pose error, and limits normal Nav2 deceleration
 to 0.35 m/s² linear and 1.0 rad/s² angular. The gentler deceleration is meant
 to remove abrupt wheel-speed changes at sharp bends without softening the
-emergency-stop path. The ZLAC8015D normal deceleration ramp is 500 ms, while
+emergency-stop path. The ZLAC8015D normal deceleration ramp was 500 ms (50 ms
+since 2026-10-05), while
 its separately configured quick-stop ramp is 10 ms and is used by the ROS
 emergency-stop callback. Preferred-route navigation uses `RouteFollowPath`,
 which raises the rotate-to-path threshold to 1.2 rad so intermediate route
@@ -462,7 +463,8 @@ progress` after 20 s. Whenever a new path starts more than 0.6 rad (~34°) off
 the robot's heading, the shim now pivots in place at 0.5 rad/s until the error
 is under 0.12 rad (~7°), then DWB follows the path with its unchanged
 parameters. This Humble shim has no braking profile, so the 0.12 rad hand-over
-is chosen to match the ~7° the motors coast during their 500 ms stop ramp.
+was chosen to match the ~7° the motors coasted with the former 500 ms ramp;
+with 50 ms ramps the pivot may stop a few degrees short and DWB finishes it.
 Replanning issues a new path, so a sharp bend at replan time may also cause a
 short pivot. Roll back by restoring the `FollowPath` plugin line to
 `dwb_core::DWBLocalPlanner` and removing the shim keys.
@@ -507,9 +509,21 @@ velocity smoother therefore builds speed gently (0.3 m/s², 0.8 rad/s²), still
 brakes promptly (−0.35 m/s², −3.0 rad/s²), and limits each axis independently
 (`scale_velocities: False`) so pivot braking is not slowed by the linear ramp.
 DWB keeps `acc_lim_theta: 3.0` because its sampling window must reach the 0.15
-rad/s stiction speed in one 20 Hz cycle. Why the drive is 2–5× slower than its
-200 ms / 500 ms ramp settings is still open; investigating it needs a motor test
-plan.
+rad/s stiction speed in one 20 Hz cycle.
+
+Fitting the bags showed the drive's time constants grow with how often the
+command changes: 0.10 s / 0.20 s (speed-up / slow-down) for steady joystick
+commands, up to 0.45 s / 1.0 s for Nav2's continuously changing commands. That
+fits a ZLAC that restarts its 200 ms / 500 ms ramp on every new target, so
+`slam_nav_launch.py` now sets both ramps to 50 ms and leaves motion shaping to
+the velocity smoother and the joy2cmd rate limiter. Commands without their own
+ramp (web-console teleop, the 0.5 s command watchdog, arbiter source switches)
+now start and stop more sharply. The E-stop quick stop stays at 10 ms.
+
+Short-ramp test (person beside the E-stop): drive slowly by joystick first and
+stop if starts or stops jerk or a wheel slips; then record
+`record_nav_test.sh short_ramps` with a goal ahead and a goal behind. The
+command-to-wheel lag should drop well below 0.5 s.
 
 To re-check heading after any IMU, wheel or EKF change, record a spin
 calibration: with a tape mark under the robot's front edge and walls in lidar

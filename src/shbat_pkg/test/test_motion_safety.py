@@ -419,3 +419,13 @@ def test_estop_release_can_be_turned_off():
 
     assert timers == []
     assert calls == ['zero_target', 'quick_stop']
+
+
+def test_drive_ramps_are_short_and_quick_stop_unchanged():
+    launch_text = (
+        Path(__file__).resolve().parents[1] / 'launch' / 'slam_nav_launch.py'
+    ).read_text()
+    # Long ZLAC ramps restart on every new target and lag Nav2 commands.
+    assert "{'accel_time_ms': 50}" in launch_text
+    assert "{'decel_time_ms': 50}" in launch_text
+    assert "{'quick_stop_decel_time_ms': 10}" in launch_text

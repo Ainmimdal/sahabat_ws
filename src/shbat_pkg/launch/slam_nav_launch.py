@@ -397,8 +397,13 @@ def generate_launch_description():
             {'odom_frame': 'odom'},
             {'base_frame': 'base_link'},
             {'odom_topic': 'wheel_odom'},
-            {'accel_time_ms': 200},
-            {'decel_time_ms': 500},
+            # The ZLAC appears to restart its ramp on every new target, so
+            # with 200/500 ms ramps it lagged Nav2's continuously changing
+            # commands by 0.5-1 s (time constants grew with how often the
+            # command changed). Short ramps let it follow; the velocity
+            # smoother and joy2cmd rate limiter shape the motion instead.
+            {'accel_time_ms': 50},
+            {'decel_time_ms': 50},
             {'quick_stop_decel_time_ms': 10},
             {'max_linear_vel': 0.5},     # Conservative indoor navigation cap
             {'max_angular_vel': 1.5},
