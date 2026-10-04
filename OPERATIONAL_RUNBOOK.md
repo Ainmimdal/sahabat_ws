@@ -259,11 +259,15 @@ Shared behaviour:
 - The dial at the top right of the map rotates only the view. Drag to rotate
   freely, with soft detents every 15° (Shift disables them). Scroll for 1°
   steps (0.1° with Shift), and click to reset.
-- Localize tab: ZED left image as MJPEG with frame-matched
-  `/apriltag/detections` outlines (tag ID, decision margin, camera fps). The
-  image is subscribed and encoded only while viewed, at up to `camera_fps` 15
-  and `camera_width` 960 (about 16 ms per frame on the Jetson). Each browser can
-  choose Smooth (15 fps) or Data saver (5 fps).
+- Localize tab: the ZED driver's own JPEG topic
+  (`/zed/zed_node/left/image_rect_color/compressed`) is forwarded untouched
+  (**Smooth**: full camera rate, about 14 fps and 2.7 MB/s; no decode or
+  encode on the robot). **Data saver** re-encodes at half resolution, 5 fps,
+  under 100 KB/s. The browser draws the `/apriltag/detections` outlines (tag ID,
+  decision margin) and shows camera fps and **detector Hz**; the detector
+  target is at least 8 Hz. The image is subscribed only while someone views it.
+  Raw `image_rect_color` (3.7 MB per frame) is too heavy for a Python
+  subscriber on the loaded Jetson and only reached 3–5 fps.
 
 Do not run **Sahabat Robot** together with the Live or New Mapping shortcuts:
 both start an operator backend and port 8088. The fixed-mode shortcuts remain

@@ -130,6 +130,7 @@ function connect() {
     applyMode(); renderHeader(); renderMapping();
   });
   on('mode', (d) => { S.mode = d; applyMode(); renderPanels(); });
+  on('camera', (d) => { S.camera = d; renderCamera(); });
 }
 
 setInterval(() => {
@@ -1255,7 +1256,7 @@ function updateCamera() {
     && !document.querySelector('[data-panel="localize"]').classList.contains('hidden');
   const on = cam.dataset.on === '1';
   if (want && !on) {
-    cam.src = `api/camera.mjpg?fps=${$('cam-fps').value}&t=${Date.now()}`;
+    cam.src = `api/camera.mjpg?mode=${$('cam-mode').value}&t=${Date.now()}`;
     cam.dataset.on = '1';
   } else if (!want && on) {
     cam.removeAttribute('src');
@@ -1263,15 +1264,55 @@ function updateCamera() {
     cam.dataset.on = '0';
   }
 }
+// Tag outlines are drawn here, over the camera image, from the 'camera'
+// event (source-pixel corners), so the robot never re-encodes frames.
+function renderCamera() {
+  const d = S.camera;
+  if (!d) return;
+  const det = d.detector_hz;
+  const stats = $('cam-stats');
+  stats.innerHTML = '';
+  const part = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; stats.append(s); };
+  part(cam.dataset.on === '1' ? `camera ${d.live ? d.camera_hz.toFixed(1) : '0'} fps · ` : 'camera off · ');
+  part(`detector ${det.toFixed(1)} Hz`, det >= 8 ? 'ok' : det > 0 ? 'bad' : '');
+  part(det > 0 && det < 8 ? ' (target ≥ 8)' : '');
+  part(` · ${d.tags.length} tag${d.tags.length === 1 ? '' : 's'}`);
+
+  const canvas2 = $('cam-overlay');
+  const g = canvas2.getContext('2d');
+  const r = canvas2.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  canvas2.width = Math.round(r.width * ratio);
+  canvas2.height = Math.round(r.height * ratio);
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, r.width, r.height);
+  if (!d.width || !d.height || cam.dataset.on !== '1') return;
+  // Same fit as object-fit: contain.
+  const scale = Math.min(r.width / d.width, r.height / d.height);
+  const ox = (r.width - d.width * scale) / 2, oy = (r.height - d.height * scale) / 2;
+  for (const tag of d.tags) {
+    const pts = tag.corners.map(([x, y]) => [ox + x * scale, oy + y * scale]);
+    g.strokeStyle = '#22c55e'; g.lineWidth = 2.5;
+    g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.stroke();
+    g.fillStyle = '#ef4444'; g.beginPath(); g.arc(pts[0][0], pts[0][1], 4, 0, 2 * Math.PI); g.fill();
+    const cx = pts.reduce((a, p) => a + p[0], 0) / 4, cy = pts.reduce((a, p) => a + p[1], 0) / 4;
+    const label = `ID ${tag.id} · margin ${tag.margin.toFixed(0)}`;
+    g.font = 'bold 12px system-ui'; const w = g.measureText(label).width;
+    g.fillStyle = 'rgba(0,0,0,.75)'; g.fillRect(cx - w / 2 - 5, cy - 10, w + 10, 20);
+    g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(label, cx, cy);
+    g.textAlign = 'start'; g.textBaseline = 'alphabetic';
+  }
+}
+
 $('cam-toggle').onchange = () => {
   $('camera-card').classList.toggle('hidden', !$('cam-toggle').checked);
   store('sahabat.cam', $('cam-toggle').checked ? '1' : '0');
   updateCamera();
 };
 $('cam-toggle').checked = store('sahabat.cam') !== '0';
-$('cam-fps').value = store('sahabat.camfps') || '15';
-$('cam-fps').onchange = () => {
-  store('sahabat.camfps', $('cam-fps').value);
+$('cam-mode').value = store('sahabat.cammode') || 'smooth';
+$('cam-mode').onchange = () => {
+  store('sahabat.cammode', $('cam-mode').value);
   cam.dataset.on = '0';
   updateCamera();
 };

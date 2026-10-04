@@ -164,15 +164,19 @@
       <div class="row">
         <label class="check"><input id="cam-toggle" type="checkbox" checked> Show ZED camera</label>
         <span class="grow"></span>
-        <select id="cam-fps" class="auto" title="Camera frame rate for this browser">
-          <option value="15">Smooth · 15 fps</option>
-          <option value="5">Data saver · 5 fps</option>
+        <select id="cam-mode" class="auto" title="Camera quality for this browser">
+          <option value="smooth">Smooth · full rate, 1280 px</option>
+          <option value="saver">Data saver · 5 fps, 640 px</option>
         </select>
       </div>
       <div id="camera-card" class="camera">
-        <img id="cam" alt="ZED left camera with detected AprilTags outlined">
+        <div class="camwrap">
+          <img id="cam" alt="ZED left camera">
+          <canvas id="cam-overlay"></canvas>
+        </div>
+        <div class="camstats" id="cam-stats">—</div>
         <div class="row">
-          <span class="muted small grow">Green outline = detected tag, red dot = first corner, m = decision margin.</span>
+          <span class="muted small grow">Green outline = detected tag, red dot = first corner, margin = detection confidence.</span>
           <a class="btn small" href="api/camera.mjpg" target="_blank" rel="noopener">Full size</a>
         </div>
       </div>

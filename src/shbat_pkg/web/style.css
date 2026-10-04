@@ -123,10 +123,14 @@ body {
 .gimbal svg { width: 44px; height: 44px; pointer-events: none; }
 .gimbal span { pointer-events: none; color: var(--muted); }
 .camera { margin-bottom: 12px; }
+.camwrap { position: relative; margin-bottom: 6px; }
 .camera img {
   display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain;
-  background: #000; border-radius: 8px; border: 1px solid var(--border); margin-bottom: 6px;
+  background: #000; border-radius: 8px; border: 1px solid var(--border);
 }
+#cam-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.camstats { font: 12px ui-monospace, monospace; color: var(--muted); margin-bottom: 6px; }
+.camstats .bad { color: var(--bad); } .camstats .ok { color: var(--ok); }
 .hint {
   position: absolute; top: 62px; left: 10px; font-size: 12px;
   background: var(--surface); padding: 4px 8px; border-radius: 6px;

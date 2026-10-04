@@ -16,7 +16,7 @@ Transport is plain HTTP from the Python standard library:
 WARNING: there is no authentication. Bind to a trusted network only.
 """
 
-import collections
+import io
 import json
 import re
 import shutil
@@ -66,7 +66,7 @@ from sahabat_interfaces.srv import (
     SetEmergencyStop,
     SetMode,
 )
-from sensor_msgs.msg import Image, LaserScan
+from sensor_msgs.msg import CompressedImage, LaserScan
 from slam_toolbox.srv import SaveMap as SlamSaveMap
 from slam_toolbox.srv import SerializePoseGraph
 from std_msgs.msg import String
@@ -236,198 +236,177 @@ class Hub:
 
 
 class CameraFeed:
-    """Lazily encoded MJPEG frames with AprilTag detection outlines.
+    """ZED preview from the driver's own JPEG topic, plus AprilTag stats.
 
-    The image subscription only exists while at least one browser is
-    watching, so the console costs nothing on the camera path otherwise.
+    Smooth viewers get the camera's JPEG frames untouched (no decode or
+    encode on the robot). Data-saver viewers get a half-resolution re-encode
+    at up to 5 fps. Tag outlines are drawn by the browser from the
+    'camera' SSE event, so the robot never re-encodes frames to draw them.
+    The image subscription exists only while someone is watching.
     """
 
-    def __init__(self, node: Node, topic: str, fps: float, width: int):
+    SAVER_PERIOD = 0.2
+
+    def __init__(self, node: Node, topic: str, publish):
         self.node = node
         self.topic = topic
-        self.period = 1.0 / max(0.5, fps)
-        self.max_width = width
+        self.publish = publish
         self.cond = threading.Condition()
-        self.new_image = threading.Event()
-        self.encode_ms = 0.0
         self.viewers = 0
+        self.saver_viewers = 0
         self.subscription = None
-        self.latest = None
-        self.latest_at = 0.0
         self.jpeg = b''
+        self.jpeg_at = 0.0
         self.sequence = 0
-        # Recent detection arrays as (stamp_ns, received_at, tags); the
-        # detector lags the image, so frames are matched by header stamp.
-        self.detections = collections.deque(maxlen=30)
-        self.image_count = 0
+        self.saver_jpeg = b''
+        self.saver_sequence = 0
+        self.saver_source = -1
+        self.size = (0, 0)
+        self.frames = 0
+        self.detections_count = 0
+        self.camera_hz = 0.0
+        self.detector_hz = 0.0
         self.rate_started = time.monotonic()
-        self.image_hz = 0.0
+        self.tags = []
+        self.tags_at = 0.0
+        self.placeholder = b''
         node.create_subscription(
             AprilTagDetectionArray, '/apriltag/detections',
             self._detections, qos_profile_sensor_data)
-        threading.Thread(target=self._encoder, daemon=True).start()
+        node.create_timer(0.2, self._tick)
+        threading.Thread(target=self._saver_loop, daemon=True).start()
 
+    # ------------------------------------------------------------ inputs
     def _detections(self, message) -> None:
-        tags = [(
-            d.id,
-            [(c.x, c.y) for c in d.corners],
-            d.decision_margin,
-        ) for d in message.detections]
-        self.detections.append(
-            (stamp_ns(message.header.stamp), time.monotonic(), tags))
+        self.detections_count += 1
+        self.tags = [{
+            'id': d.id,
+            'corners': [[round(c.x, 1), round(c.y, 1)] for c in d.corners],
+            'margin': round(d.decision_margin, 1),
+        } for d in message.detections]
+        self.tags_at = time.monotonic()
 
-    def _tags_for(self, image_stamp: int):
-        """Detections computed from this frame, else the closest earlier ones."""
-        history = list(self.detections)
-        if image_stamp:
-            best = None
-            for stamp, _received, tags in history:
-                if stamp == image_stamp:
-                    return tags
-                if stamp and stamp <= image_stamp and image_stamp - stamp < 300_000_000:
-                    if best is None or stamp > best[0]:
-                        best = (stamp, tags)
-            if best is not None:
-                return best[1]
-            if any(stamp for stamp, _r, _t in history):
-                return []
-        # Unstamped sources: fall back to anything received recently.
-        if history and time.monotonic() - history[-1][1] < 0.5:
-            return history[-1][2]
-        return []
-
-    def _image(self, message: Image) -> None:
-        self.latest = message
-        self.latest_at = time.monotonic()
-        self.image_count += 1
-        self.new_image.set()
-
-    def attach(self) -> None:
+    def _image(self, message: CompressedImage) -> None:
+        data = bytes(message.data)
+        if not self.size[0] or self.frames % 30 == 0:
+            self.size = jpeg_size(data) or self.size
+        self.frames += 1
         with self.cond:
-            self.viewers += 1
-            if self.subscription is None:
-                self.subscription = self.node.create_subscription(
-                    Image, self.topic, self._image, qos_profile_sensor_data)
-                self.rate_started = time.monotonic()
-                self.image_count = 0
+            self.jpeg = data
+            self.jpeg_at = time.monotonic()
+            self.sequence += 1
             self.cond.notify_all()
 
-    def detach(self) -> None:
+    def _tick(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self.rate_started
+        if elapsed >= 2.0:
+            self.camera_hz = self.frames / elapsed if self.subscription else 0.0
+            self.detector_hz = self.detections_count / elapsed
+            self.frames = 0
+            self.detections_count = 0
+            self.rate_started = now
+        fresh = now - self.tags_at < 0.6
+        self.publish('camera', {
+            'width': self.size[0],
+            'height': self.size[1],
+            'camera_hz': round(self.camera_hz, 1),
+            'detector_hz': round(self.detector_hz, 1),
+            'tags': self.tags if fresh else [],
+            'live': bool(self.subscription) and now - self.jpeg_at < 2.0,
+        })
+
+    # ----------------------------------------------------------- viewers
+    def attach(self, saver: bool) -> None:
+        with self.cond:
+            self.viewers += 1
+            self.saver_viewers += int(saver)
+            if self.subscription is None:
+                self.subscription = self.node.create_subscription(
+                    CompressedImage, self.topic, self._image,
+                    qos_profile_sensor_data)
+            self.cond.notify_all()
+
+    def detach(self, saver: bool) -> None:
         with self.cond:
             self.viewers = max(0, self.viewers - 1)
+            self.saver_viewers = max(0, self.saver_viewers - int(saver))
             if self.viewers == 0 and self.subscription is not None:
                 self.node.destroy_subscription(self.subscription)
                 self.subscription = None
-                self.latest = None
+                self.jpeg = b''
 
-    def wait_frame(self, last_sequence: int, timeout: float):
+    def wait_frame(self, last: int, saver: bool, timeout: float):
         with self.cond:
-            self.cond.wait_for(
-                lambda: self.sequence != last_sequence, timeout=timeout)
-            return self.sequence, self.jpeg
-
-    def _encoder(self) -> None:
-        try:
-            from PIL import Image as PilImage, ImageDraw, ImageFont
-        except ImportError:
-            self.node.get_logger().warning('python3-pil missing; camera view disabled')
-            return
-        try:
-            self.font = ImageFont.truetype(
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 16)
-        except OSError:
-            self.font = ImageFont.load_default()
-        while rclpy.ok():
-            with self.cond:
-                self.cond.wait_for(lambda: self.viewers > 0, timeout=1.0)
-                if self.viewers == 0:
-                    continue
-            # Encode each new camera frame (capped at camera_fps); fall back
-            # to a placeholder once a second when no image is arriving.
-            self.new_image.wait(timeout=1.0)
-            self.new_image.clear()
-            started = time.monotonic()
-            elapsed = started - self.rate_started
-            if elapsed >= 2.0:
-                self.image_hz = self.image_count / elapsed
-                self.image_count = 0
-                self.rate_started = started
-            message = self.latest
-            if message is None or started - self.latest_at > 2.0:
-                frame = self._placeholder(PilImage, ImageDraw)
+            if saver:
+                self.cond.wait_for(
+                    lambda: self.saver_sequence != last, timeout=timeout)
+                sequence, frame = self.saver_sequence, self.saver_jpeg
             else:
-                try:
-                    frame = self._render(message, PilImage, ImageDraw)
-                    self.encode_ms = 0.8 * self.encode_ms + 200.0 * (
-                        time.monotonic() - started)
-                except ValueError as error:
-                    frame = self._placeholder(PilImage, ImageDraw, str(error))
+                self.cond.wait_for(
+                    lambda: self.sequence != last, timeout=timeout)
+                sequence, frame = self.sequence, self.jpeg
+            stale = time.monotonic() - self.jpeg_at > 2.0
+        if not frame or stale:
+            return sequence, self._placeholder()
+        return sequence, frame
+
+    def _saver_loop(self) -> None:
+        while rclpy.ok():
+            time.sleep(self.SAVER_PERIOD)
             with self.cond:
-                self.jpeg = frame
-                self.sequence += 1
-                self.cond.notify_all()
-            # Cap at camera_fps without skipping frames that arrive on time.
-            time.sleep(max(0.0, 0.8 * self.period - (time.monotonic() - started)))
+                if not self.saver_viewers or self.sequence == self.saver_source:
+                    continue
+                source, data = self.sequence, self.jpeg
+            frame = half_size_jpeg(data)
+            if frame:
+                with self.cond:
+                    self.saver_jpeg = frame
+                    self.saver_source = source
+                    self.saver_sequence += 1
+                    self.cond.notify_all()
 
-    def _render(self, message: Image, PilImage, ImageDraw) -> bytes:
-        size = (message.width, message.height)
-        data = bytes(message.data)
-        encoding = message.encoding.lower()
-        # Decode straight to RGB (alpha dropped by the unpacker): one pass.
-        if encoding == 'bgra8':
-            image = PilImage.frombuffer('RGB', size, data, 'raw', 'BGRX', message.step, 1)
-        elif encoding == 'rgba8':
-            image = PilImage.frombuffer('RGB', size, data, 'raw', 'RGBX', message.step, 1)
-        elif encoding == 'bgr8':
-            image = PilImage.frombuffer('RGB', size, data, 'raw', 'BGR', message.step, 1)
-        elif encoding == 'rgb8':
-            image = PilImage.frombuffer('RGB', size, data, 'raw', 'RGB', message.step, 1)
-        elif encoding == 'mono8':
-            image = PilImage.frombuffer('L', size, data, 'raw', 'L', message.step, 1)
-        else:
-            raise ValueError(f'Unsupported encoding {message.encoding}')
-        if image.mode != 'RGB':
-            image = image.convert('RGB')
-        scale = min(1.0, self.max_width / float(message.width))
-        if scale < 1.0:
-            image = image.resize(
-                (int(message.width * scale), int(message.height * scale)),
-                PilImage.BILINEAR)
-        draw = ImageDraw.Draw(image)
-        tags = self._tags_for(stamp_ns(message.header.stamp))
-        for tag_id, corners, margin in tags:
-            points = [(x * scale, y * scale) for x, y in corners]
-            draw.line(points + points[:1], fill=(34, 197, 94), width=3)
-            draw.ellipse([points[0][0] - 4, points[0][1] - 4,
-                          points[0][0] + 4, points[0][1] + 4], fill=(239, 68, 68))
-            cx = sum(p[0] for p in points) / 4.0
-            cy = sum(p[1] for p in points) / 4.0
-            label = f'ID {tag_id}  margin {margin:.0f}'
-            box = draw.textbbox((cx, cy), label, font=self.font, anchor='mm')
-            draw.rectangle([box[0] - 4, box[1] - 3, box[2] + 4, box[3] + 3],
-                           fill=(0, 0, 0))
-            draw.text((cx, cy), label, fill=(255, 255, 255),
-                      font=self.font, anchor='mm')
-        status = (f'camera {self.image_hz:.1f} fps  {message.width}x{message.height}  '
-                  f'encode {self.encode_ms:.0f} ms  tags: {len(tags)}')
-        box = draw.textbbox((6, 4), status, font=self.font)
-        draw.rectangle([0, 0, box[2] + 6, box[3] + 4], fill=(0, 0, 0))
-        draw.text((6, 4), status, fill=(255, 255, 255), font=self.font)
-        return self._jpeg(image)
+    def _placeholder(self) -> bytes:
+        if not self.placeholder:
+            try:
+                from PIL import Image as PilImage, ImageDraw, ImageFont
+                image = PilImage.new('RGB', (640, 360), (24, 28, 35))
+                try:
+                    font = ImageFont.truetype(
+                        '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', 15)
+                except OSError:
+                    font = ImageFont.load_default()
+                ImageDraw.Draw(image).text(
+                    (20, 170), f'Waiting for {self.topic}',
+                    fill=(200, 205, 215), font=font)
+                buffer = io.BytesIO()
+                image.save(buffer, format='JPEG', quality=70)
+                self.placeholder = buffer.getvalue()
+            except ImportError:
+                return b''
+        return self.placeholder
 
-    def _placeholder(self, PilImage, ImageDraw, text: str = '') -> bytes:
-        image = PilImage.new('RGB', (640, 360), (24, 28, 35))
-        draw = ImageDraw.Draw(image)
-        draw.text((20, 170), text or f'Waiting for camera image on {self.topic}',
-                  fill=(200, 205, 215), font=self.font)
-        return self._jpeg(image)
 
-    @staticmethod
-    def _jpeg(image) -> bytes:
-        import io
+def jpeg_size(data: bytes):
+    """(width, height) from a JPEG header without decoding pixels."""
+    try:
+        from PIL import Image as PilImage
+        return PilImage.open(io.BytesIO(data)).size
+    except Exception:
+        return None
+
+
+def half_size_jpeg(data: bytes) -> bytes:
+    """Re-encode at half resolution using JPEG DCT scaling (fast)."""
+    try:
+        from PIL import Image as PilImage
+        image = PilImage.open(io.BytesIO(data))
+        image.draft('RGB', (image.width // 2, image.height // 2))
         buffer = io.BytesIO()
-        image.save(buffer, format='JPEG', quality=72)
+        image.convert('RGB').save(buffer, format='JPEG', quality=75)
         return buffer.getvalue()
+    except Exception:
+        return b''
 
 
 class WebConsole(Node):
@@ -442,9 +421,7 @@ class WebConsole(Node):
         self.declare_parameter('scan_rate', 5.0)
         self.declare_parameter('maps_directory', '~/sahabat_ws/maps')
         self.declare_parameter(
-            'camera_topic', '/zed/zed_node/left/image_rect_color')
-        self.declare_parameter('camera_fps', 15.0)
-        self.declare_parameter('camera_width', 960)
+            'camera_topic', '/zed/zed_node/left/image_rect_color/compressed')
 
         self.lock = threading.Lock()
         self.lease_id = ''
@@ -529,11 +506,8 @@ class WebConsole(Node):
         }
 
         self.camera = CameraFeed(
-            self,
-            str(self.get_parameter('camera_topic').value),
-            float(self.get_parameter('camera_fps').value),
-            int(self.get_parameter('camera_width').value),
-        )
+            self, str(self.get_parameter('camera_topic').value),
+            lambda event, payload: self.hub.publish(event, payload))
 
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)).expanduser()
@@ -1340,26 +1314,16 @@ def make_handler(node: WebConsole, hub: Hub, web_root: Path):
             self.send_header('Cache-Control', 'no-store')
             self.end_headers()
             camera = node.camera
-            # Optional per-viewer cap, e.g. ?fps=5 for a slow remote link.
+            # ?mode=saver: half resolution at 5 fps for slow links.
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
-            try:
-                min_gap = 1.0 / max(0.5, float(query.get('fps', ['100'])[0]))
-            except ValueError:
-                min_gap = 0.0
-            camera.attach()
+            saver = query.get('mode', [''])[0] == 'saver'
+            camera.attach(saver)
             sequence = -1
-            sent_at = 0.0
             try:
                 while True:
-                    sequence, frame = camera.wait_frame(sequence, timeout=5.0)
+                    sequence, frame = camera.wait_frame(sequence, saver, 2.0)
                     if not frame:
                         continue
-                    now = time.monotonic()
-                    # Tolerate frame-time jitter so ?fps=15 on a 15 fps
-                    # camera does not drop every other frame.
-                    if now - sent_at < 0.75 * min_gap:
-                        continue
-                    sent_at = now
                     self.wfile.write(
                         f'--{boundary}\r\nContent-Type: image/jpeg\r\n'
                         f'Content-Length: {len(frame)}\r\n\r\n'.encode())
@@ -1369,7 +1333,7 @@ def make_handler(node: WebConsole, hub: Hub, web_root: Path):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
-                camera.detach()
+                camera.detach(saver)
                 self.close_connection = True
 
         def _stream(self):
