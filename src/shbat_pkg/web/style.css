@@ -235,6 +235,8 @@ dialog {
 dialog::backdrop { background: rgba(0, 0, 0, .45); }
 dialog h3 { margin: 0 0 8px; }
 dialog input { margin-bottom: 12px; }
+.dlg-check { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; line-height: 1.35; cursor: pointer; }
+.dlg-check input { margin: 3px 0 0; flex: none; width: 18px; height: 18px; }
 
 @media (max-width: 860px) {
   body { overflow: auto; height: auto; min-height: 100%; }

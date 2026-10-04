@@ -13,7 +13,7 @@ def test_full_mapping_matches_new_mapping_shortcut(tmp_path):
 
 
 def test_full_operations_matches_live_shortcut(tmp_path):
-    """Operations mirrors live_waypoint_editor: same map, sets, ZED and API."""
+    """Operations mirrors live_waypoint_editor (map, sets, API), camera off."""
     (tmp_path / 'cuteroom.yaml').write_text('image: cuteroom.pgm\n')
     command = full_stack_command('operations', 'cuteroom', tmp_path)
     assert command[:4] == ['ros2', 'launch', 'shbat_pkg', 'operations.launch.py']
@@ -24,12 +24,21 @@ def test_full_operations_matches_live_shortcut(tmp_path):
         'use_rviz:=false',
         'use_waypoint_gui:=false',
         'use_api:=true',
-        'use_zed:=true',
+        'use_zed:=false',
         'localization_backend:=amcl',
     ):
         assert argument in command
     # The full profile starts the hardware drivers itself.
     assert not any(item.startswith('use_hardware') for item in command)
+
+
+def test_full_operations_starts_camera_only_when_asked(tmp_path):
+    """The ZED/AprilTag camera is opt-in; mapping never starts it."""
+    (tmp_path / 'cuteroom.yaml').write_text('image: cuteroom.pgm\n')
+    command = full_stack_command('operations', 'cuteroom', tmp_path, True)
+    assert 'use_zed:=true' in command
+    assert 'use_zed:=false' not in command
+    assert 'use_zed:=false' in full_stack_command('mapping', '', tmp_path, True)
 
 
 def test_full_operations_accepts_folder_maps(tmp_path):

@@ -36,6 +36,8 @@ from apriltag_msgs.msg import AprilTagDetectionArray
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from nav_msgs.msg import OccupancyGrid, Path as NavPath
 import rclpy
+from rcl_interfaces.msg import Parameter, ParameterType, ParameterValue
+from rcl_interfaces.srv import SetParameters
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
@@ -499,6 +501,9 @@ class WebConsole(Node):
                                callback_group=self.group),
             'mode_manager': client(SetMode, '/operator/internal/set_mode',
                                    callback_group=self.group),
+            'mode_manager_params': client(
+                SetParameters, '/operator_mode_manager/set_parameters',
+                callback_group=self.group),
             'sets': client(ListWaypointSets, '/operator/waypoint_sets/list',
                            callback_group=self.group),
             'set_manage': client(ManageWaypointSet,
@@ -1096,6 +1101,7 @@ class WebConsole(Node):
             'mode': str(state.get('mode', '')),
             'map_id': str(state.get('map_id', '')),
             'detail': str(state.get('detail', '')),
+            'use_zed': bool(state.get('use_zed', False)),
         }
         self._publish_mode()
 
@@ -1118,6 +1124,8 @@ class WebConsole(Node):
                 'was started by a fixed-mode shortcut')
         if self.switching:
             raise RuntimeError(f'Already switching to {self.switching}')
+        if mode == 'operations':
+            self._set_camera_choice(bool(cmd.get('use_zed', False)))
         self.switching = mode
         self._publish_mode()
         try:
@@ -1130,6 +1138,18 @@ class WebConsole(Node):
         if not result.success:
             raise RuntimeError(result.message)
         return result.message
+
+    def _set_camera_choice(self, use_zed: bool) -> None:
+        """Tell the mode manager whether Operating starts the ZED camera."""
+        request = SetParameters.Request(parameters=[Parameter(
+            name='use_zed',
+            value=ParameterValue(
+                type=ParameterType.PARAMETER_BOOL, bool_value=use_zed),
+        )])
+        result = self._call('mode_manager_params', request)
+        if not result.results or not result.results[0].successful:
+            reason = result.results[0].reason if result.results else ''
+            raise RuntimeError(f'Could not set the camera option: {reason}')
 
     def _existing_map_files(self, name: str):
         stem = self.maps_directory / name

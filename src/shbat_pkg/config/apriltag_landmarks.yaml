@@ -41,8 +41,8 @@ apriltag_landmark_manager:
     maximum_tag_disagreement_position: 0.25
     maximum_tag_disagreement_yaw: 0.35
     # Ignore tags farther than this for startup localization (PnP yaw gets
-    # unreliable on small, distant tags).
-    maximum_initialization_distance: 4.0
+    # unreliable on small, distant tags; the ZED runs at VGA).
+    maximum_initialization_distance: 3.0
     # Confirm/refine every tag pose with the lidar scan before seeding AMCL.
     scan_validation: true
     scan_refine_xy_window: 0.40
