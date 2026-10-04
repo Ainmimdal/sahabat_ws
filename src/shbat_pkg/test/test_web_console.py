@@ -60,3 +60,38 @@ def test_map_names_rejected(name):
     """Reject names that could escape the maps folder or break file stems."""
     from shbat_pkg.web_console import VALID_MAP_NAME
     assert not VALID_MAP_NAME.fullmatch(name)
+
+
+def test_upside_down_lidar_is_not_mirrored():
+    """rpy (pi, 0, pi) maps laser (x, y) to base (-x, y), not a yaw-only turn."""
+    from types import SimpleNamespace
+
+    from shbat_pkg.web_console import planar_projection
+
+    # Live base_link -> lidar_link transform on the robot (xyzw ~ 0, 1, 0, 0).
+    transform = SimpleNamespace(
+        rotation=SimpleNamespace(x=0.0, y=1.0, z=0.0, w=0.0),
+        translation=SimpleNamespace(x=0.07, y=0.0, z=0.25),
+    )
+    r00, r01, r10, r11, tx, ty = planar_projection(transform)
+    project = lambda x, y: (r00 * x + r01 * y + tx, r10 * x + r11 * y + ty)  # noqa: E731
+
+    assert project(1.0, 0.0) == pytest.approx((-0.93, 0.0))
+    # Yaw-only handling would have put this point at y = -1 (mirrored).
+    assert project(0.0, 1.0) == pytest.approx((0.07, 1.0))
+
+
+def test_planar_projection_plain_yaw():
+    """A level frame rotated 90 degrees behaves like a 2D rotation."""
+    import math
+    from types import SimpleNamespace
+
+    from shbat_pkg.web_console import planar_projection
+
+    half = math.pi / 4.0
+    transform = SimpleNamespace(
+        rotation=SimpleNamespace(x=0.0, y=0.0, z=math.sin(half), w=math.cos(half)),
+        translation=SimpleNamespace(x=1.0, y=2.0, z=0.0),
+    )
+    r00, r01, r10, r11, tx, ty = planar_projection(transform)
+    assert (r00 * 1.0 + tx, r10 * 1.0 + ty) == pytest.approx((1.0, 3.0))

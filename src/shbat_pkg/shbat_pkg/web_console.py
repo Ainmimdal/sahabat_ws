@@ -94,6 +94,23 @@ def yaw_of(q) -> float:
     )
 
 
+def planar_projection(transform):
+    """Project a 3D transform onto the target XY plane.
+
+    Returns (r00, r01, r10, r11, tx, ty) so that a point (x, y, 0) in the
+    source frame lands at (r00*x + r01*y + tx, r10*x + r11*y + ty). Using the
+    full rotation matters for frames that are rolled, such as the
+    upside-down lidar (rpy 3.14 0 3.14): yaw alone mirrors the scan.
+    """
+    q = transform.rotation
+    x, y, z, w = q.x, q.y, q.z, q.w
+    return (
+        1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w),
+        2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z),
+        transform.translation.x, transform.translation.y,
+    )
+
+
 def stamp_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
@@ -505,19 +522,31 @@ class WebConsole(Node):
             return None
         return (tf.translation.x, tf.translation.y, yaw_of(tf.rotation))
 
+    def _scan_transform(self, target: str, message: LaserScan):
+        """Full transform at the scan time (like RViz), else the latest."""
+        source = message.header.frame_id
+        for when in (rclpy.time.Time.from_msg(message.header.stamp),
+                     rclpy.time.Time()):
+            try:
+                return self.tf_buffer.lookup_transform(
+                    target, source, when).transform
+            except Exception:
+                continue
+        return None
+
     def _scan(self, message: LaserScan) -> None:
         now = time.monotonic()
         if now - self.last_scan_sent < self.scan_period or not self.hub.clients:
             return
         self.last_scan_sent = now
         frame = 'map'
-        pose = self._transform_2d('map', message.header.frame_id)
-        if pose is None:
+        transform = self._scan_transform('map', message)
+        if transform is None:
             frame = 'odom'
-            pose = self._transform_2d('odom', message.header.frame_id)
-        if pose is None:
+            transform = self._scan_transform('odom', message)
+        if transform is None:
             return
-        tx, ty, tyaw = pose
+        r00, r01, r10, r11, tx, ty = planar_projection(transform)
         ranges = message.ranges
         step = max(1, len(ranges) // MAX_SCAN_POINTS)
         points = []
@@ -525,9 +554,10 @@ class WebConsole(Node):
             r = ranges[index]
             if not math.isfinite(r) or r < message.range_min or r > message.range_max:
                 continue
-            angle = tyaw + message.angle_min + index * message.angle_increment
-            points.append(round(tx + r * math.cos(angle), 3))
-            points.append(round(ty + r * math.sin(angle), 3))
+            angle = message.angle_min + index * message.angle_increment
+            lx, ly = r * math.cos(angle), r * math.sin(angle)
+            points.append(round(r00 * lx + r01 * ly + tx, 3))
+            points.append(round(r10 * lx + r11 * ly + ty, 3))
         self.hub.publish('scan', {'frame': frame, 'points': points})
 
     def _plan(self, message: NavPath) -> None:
