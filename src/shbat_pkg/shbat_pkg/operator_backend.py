@@ -63,6 +63,10 @@ class OperatorBackend(Node):
         self.declare_parameter('teleop_timeout', 0.25)
         self.declare_parameter('max_linear_speed', 0.50)
         self.declare_parameter('max_angular_speed', 1.20)
+        # Remote teleop slew limits, matching joy2cmd. With 50 ms drive ramps
+        # these are the only softening for browser and Foxglove driving.
+        self.declare_parameter('teleop_linear_accel', 0.60)  # m/s^2
+        self.declare_parameter('teleop_angular_accel', 1.20)  # rad/s^2
         self.declare_parameter('active_map', '')
         self.declare_parameter('localization_backend', 'amcl')
         # Mode of a stack started without operator_mode_manager (for example
@@ -86,6 +90,12 @@ class OperatorBackend(Node):
         self.max_angular = float(
             self.get_parameter('max_angular_speed').value
         )
+        self.teleop_linear_accel = float(
+            self.get_parameter('teleop_linear_accel').value
+        )
+        self.teleop_angular_accel = float(
+            self.get_parameter('teleop_angular_accel').value
+        )
         self.localization_backend = str(
             self.get_parameter('localization_backend').value
         )
@@ -96,6 +106,14 @@ class OperatorBackend(Node):
         self.estop_active = False
         self.remote_active = False
         self.last_remote_command = 0.0
+        # Requested and slew-limited remote command (linear, angular).
+        self.remote_target = (0.0, 0.0)
+        self.remote_output = (0.0, 0.0)
+        self.remote_releasing = False
+        self.last_remote_ramp = 0.0
+        # Teleop callbacks (reentrant group) and the safety timer can run
+        # concurrently on the multithreaded executor.
+        self.remote_lock = threading.RLock()
         self.last_sequence = None
         self.mode = {
             'mapping': OperatorStatus.MODE_MAPPING,
@@ -459,21 +477,13 @@ class OperatorBackend(Node):
         self.last_sequence = message.sequence
         self.last_remote_command = self._now()
         if not message.deadman:
-            self._stop_remote()
+            self._release_remote()
             return
 
-        command = Twist()
-        command.linear.x = max(
-            -self.max_linear,
-            min(self.max_linear, message.twist.linear.x),
+        self._set_remote_target(
+            message.twist.linear.x,
+            message.twist.angular.z,
         )
-        command.angular.z = max(
-            -self.max_angular,
-            min(self.max_angular, message.twist.angular.z),
-        )
-        self.remote_active = True
-        self.remote_active_pub.publish(Bool(data=True))
-        self.remote_pub.publish(command)
 
     def _foxglove_joy(self, message: Joy) -> None:
         """Accept Foxglove teleop through a standard, bridge-known type."""
@@ -497,26 +507,71 @@ class OperatorBackend(Node):
 
         self.last_remote_command = self._now()
         if not bool(message.buttons[0]):
-            self._stop_remote()
+            self._release_remote()
             return
 
-        command = Twist()
-        command.linear.x = max(
-            -self.max_linear,
-            min(self.max_linear, linear),
-        )
-        command.angular.z = max(
-            -self.max_angular,
-            min(self.max_angular, angular),
-        )
-        self.remote_active = True
-        self.remote_active_pub.publish(Bool(data=True))
-        self.remote_pub.publish(command)
+        self._set_remote_target(linear, angular)
+
+    def _set_remote_target(self, linear: float, angular: float) -> None:
+        """Take remote control and ramp toward a clamped command."""
+        with self.remote_lock:
+            if not self.remote_active:
+                self.remote_output = (0.0, 0.0)
+                self.last_remote_ramp = self._now()
+            self.remote_target = (
+                max(-self.max_linear, min(self.max_linear, linear)),
+                max(-self.max_angular, min(self.max_angular, angular)),
+            )
+            self.remote_releasing = False
+            self.remote_active = True
+            self.remote_active_pub.publish(Bool(data=True))
+            self._step_remote_ramp()
+
+    def _release_remote(self) -> None:
+        """Ramp a released remote command to zero, then yield control."""
+        with self.remote_lock:
+            if not self.remote_active:
+                return
+            self.remote_target = (0.0, 0.0)
+            self.remote_releasing = True
+            self._step_remote_ramp()
+
+    def _step_remote_ramp(self) -> None:
+        """Publish the next slew-limited remote command."""
+        with self.remote_lock:
+            if not self.remote_active:
+                return
+            now = self._now()
+            dt = min(max(now - self.last_remote_ramp, 0.0), 0.2)
+            self.last_remote_ramp = now
+
+            def slew(current, target, limit):
+                step = limit * dt
+                return current + max(-step, min(step, target - current))
+
+            self.remote_output = (
+                slew(self.remote_output[0], self.remote_target[0],
+                     self.teleop_linear_accel),
+                slew(self.remote_output[1], self.remote_target[1],
+                     self.teleop_angular_accel),
+            )
+            command = Twist()
+            command.linear.x, command.angular.z = self.remote_output
+            self.remote_pub.publish(command)
+            if self.remote_releasing and self.remote_output == (0.0, 0.0):
+                self.remote_active = False
+                self.remote_releasing = False
+                self.remote_active_pub.publish(Bool(data=False))
 
     def _stop_remote(self) -> None:
-        self.remote_active = False
-        self.remote_active_pub.publish(Bool(data=False))
-        self.remote_pub.publish(Twist())
+        """Stop remote driving immediately (safety and mode changes)."""
+        with self.remote_lock:
+            self.remote_active = False
+            self.remote_releasing = False
+            self.remote_target = (0.0, 0.0)
+            self.remote_output = (0.0, 0.0)
+            self.remote_active_pub.publish(Bool(data=False))
+            self.remote_pub.publish(Twist())
 
     def _latch_estop(self, reason: str) -> None:
         self.estop_active = True
@@ -557,9 +612,16 @@ class OperatorBackend(Node):
             self.lease_deadline = 0.0
             self._stop_remote()
             self.get_logger().warning('Control lease expired; remote stopped')
-        if self.remote_active and now - self.last_remote_command > self.teleop_timeout:
-            self._stop_remote()
-            self.get_logger().warning('Remote command timed out; remote stopped')
+        if (
+            self.remote_active
+            and not self.remote_releasing
+            and now - self.last_remote_command > self.teleop_timeout
+        ):
+            self._release_remote()
+            self.get_logger().warning(
+                'Remote command timed out; ramping remote to a stop'
+            )
+        self._step_remote_ramp()
 
     def _odom(self, message: Odometry) -> None:
         self.linear_velocity = message.twist.twist.linear.x

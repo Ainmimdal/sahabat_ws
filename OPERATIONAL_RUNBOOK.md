@@ -516,9 +516,13 @@ command changes: 0.10 s / 0.20 s (speed-up / slow-down) for steady joystick
 commands, up to 0.45 s / 1.0 s for Nav2's continuously changing commands. That
 fits a ZLAC that restarts its 200 ms / 500 ms ramp on every new target, so
 `slam_nav_launch.py` now sets both ramps to 50 ms and leaves motion shaping to
-the velocity smoother and the joy2cmd rate limiter. Commands without their own
-ramp (web-console teleop, the 0.5 s command watchdog, arbiter source switches)
-now start and stop more sharply. The E-stop quick stop stays at 10 ms.
+the velocity smoother and the joy2cmd rate limiter. `operator_backend` slew-limits
+web-console and Foxglove teleop at the same 0.6 m/s² and 1.2 rad/s², ramping to
+a stop when the on-screen stick is released or its command stream times out
+(about 0.8 s from 0.5 m/s), and only then hands control back. E-stop, lease
+loss, localization recovery and mode or map changes still stop remote driving
+immediately. Commands without any ramp (the 0.5 s command watchdog, arbiter
+source switches) start and stop sharply. The E-stop quick stop stays at 10 ms.
 
 Short-ramp test (person beside the E-stop): drive slowly by joystick first and
 stop if starts or stops jerk or a wheel slips; then record
