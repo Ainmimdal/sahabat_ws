@@ -285,6 +285,21 @@ class MappingControlPanel:
             )
             return
 
+        # slam_toolbox reports success even when its map_saver_cli child
+        # times out (2 s) and writes nothing, so check the files themselves.
+        missing = [
+            self.pending_stem.with_suffix(extension).name
+            for extension in ('.yaml', '.pgm')
+            if not self.pending_stem.with_suffix(extension).exists()
+        ]
+        if missing:
+            self.root.after(
+                0,
+                self._failure,
+                'SLAM reported success but did not write '
+                f'{", ".join(missing)}. Try saving again.',
+            )
+            return
         self.root.after(
             0,
             self._log,

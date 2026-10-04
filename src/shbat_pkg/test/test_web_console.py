@@ -95,3 +95,29 @@ def test_planar_projection_plain_yaw():
     )
     r00, r01, r10, r11, tx, ty = planar_projection(transform)
     assert (r00 * 1.0 + tx, r10 * 1.0 + ty) == pytest.approx((1.0, 3.0))
+
+
+def test_write_map_files_matches_map_saver_format(tmp_path):
+    """Trinary PGM (0/205/254, top row = max y) and nav2 map_saver YAML."""
+    import yaml
+    from nav_msgs.msg import OccupancyGrid
+
+    from shbat_pkg.web_console import write_map_files
+
+    grid = OccupancyGrid()
+    grid.info.width, grid.info.height, grid.info.resolution = 3, 2, 0.05
+    grid.info.origin.position.x, grid.info.origin.position.y = -1.5, 2.25
+    grid.info.origin.orientation.w = 1.0
+    grid.data = [100, 0, -1,    # bottom row (y = origin)
+                 50, 25, 65]    # top row
+    write_map_files(grid, tmp_path / 'room')
+
+    pgm = (tmp_path / 'room.pgm').read_bytes()
+    assert pgm == b'P5\n3 2\n255\n' + bytes([205, 254, 0, 0, 254, 205])
+    meta = yaml.safe_load((tmp_path / 'room.yaml').read_text())
+    assert meta == {
+        'image': 'room.pgm', 'mode': 'trinary', 'resolution': 0.05,
+        'origin': [-1.5, 2.25, 0], 'negate': 0,
+        'occupied_thresh': 0.65, 'free_thresh': 0.25,
+    }
+    assert not list(tmp_path.glob('.*.partial'))

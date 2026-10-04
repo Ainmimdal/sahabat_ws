@@ -69,7 +69,6 @@ from sahabat_interfaces.srv import (
 from sensor_msgs.msg import Image, LaserScan
 from slam_toolbox.srv import SaveMap as SlamSaveMap
 from slam_toolbox.srv import SerializePoseGraph
-from std_msgs.msg import String as StringMsg
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
@@ -109,6 +108,50 @@ def planar_projection(transform):
         2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z),
         transform.translation.x, transform.translation.y,
     )
+
+
+def write_map_files(grid, stem: Path) -> list:
+    """Write <stem>.pgm and <stem>.yaml exactly like nav2 map_saver (trinary).
+
+    Cells <= 25 are free (254), >= 65 occupied (0), the rest and -1 unknown
+    (205); row 0 of the PGM is the top (maximum y) of the map.
+    """
+    info = grid.info
+    width, height = info.width, info.height
+    lut = bytearray(256)
+    for value in range(256):
+        signed = value - 256 if value > 127 else value
+        if signed < 0:
+            lut[value] = 205
+        elif signed <= 25:
+            lut[value] = 254
+        elif signed >= 65:
+            lut[value] = 0
+        else:
+            lut[value] = 205
+    raw = bytes(v & 0xFF for v in grid.data).translate(bytes(lut))
+    rows = [raw[row * width:(row + 1) * width]
+            for row in range(height - 1, -1, -1)]
+    pgm = f'P5\n{width} {height}\n255\n'.encode() + b''.join(rows)
+    yaw = yaw_of(info.origin.orientation)
+    yaml_text = (
+        f'image: {stem.name}.pgm\n'
+        'mode: trinary\n'
+        f'resolution: {info.resolution:.3g}\n'
+        f'origin: [{info.origin.position.x:.6g}, {info.origin.position.y:.6g}, '
+        f'{yaw:.6g}]\n'
+        'negate: 0\n'
+        'occupied_thresh: 0.65\n'
+        'free_thresh: 0.25\n'
+    )
+    written = []
+    for suffix, data in (('.pgm', pgm), ('.yaml', yaml_text.encode())):
+        target = stem.with_suffix(suffix)
+        partial = target.with_name(f'.{target.name}.partial')
+        partial.write_bytes(data)
+        partial.replace(target)
+        written.append(target)
+    return written
 
 
 def stamp_ns(stamp) -> int:
@@ -404,6 +447,7 @@ class WebConsole(Node):
         self.active_map = ''
         self.graph = {'revision': 0, 'set_id': '', 'segments': []}
         self.map_png = b''
+        self.latest_map = None
         self.map_version = 0
         self.last_scan_sent = 0.0
         self.last_plan_sent = 0.0
@@ -497,6 +541,7 @@ class WebConsole(Node):
 
     # ------------------------------------------------------------------ ROS in
     def _map(self, message: OccupancyGrid) -> None:
+        self.latest_map = message
         info = message.info
         png = encode_map_png(info.width, info.height, message.data)
         with self.lock:
@@ -1032,11 +1077,14 @@ class WebConsole(Node):
         return {'existing': [p.name for p in self._existing_map_files(name)]}
 
     def op_save_map(self, cmd, client):
-        """Save the live SLAM map like mapping_control_panel does.
+        """Save the live SLAM map: <name>.yaml/.pgm plus <name>.posegraph/.data.
 
-        Files land at <maps_directory>/<name>.{yaml,pgm} plus the editable
-        session <name>.{posegraph,data}. Replaced files are first moved to
-        <maps_directory>/.archive/<name>-<timestamp>/.
+        The navigation map is written by this node from the /map it already
+        holds, in nav2 map_saver format. slam_toolbox's own save_map runs
+        map_saver_cli with a 2 s subscription timeout, which fails silently
+        on a loaded Jetson while still reporting success. Every file is
+        checked on disk before success is reported. Replaced files are first
+        moved to <maps_directory>/.archive/<name>-<timestamp>/.
         """
         self._require_lease(client)
         name = str(cmd.get('name', '')).strip()
@@ -1047,6 +1095,9 @@ class WebConsole(Node):
             raise RuntimeError(f'Already saving {self.map_saving}')
         if not self.slam_save.service_is_ready():
             raise RuntimeError('SLAM mapping is not running')
+        grid = self.latest_map
+        if grid is None or not grid.info.width or not grid.info.height:
+            raise RuntimeError('No map received from SLAM yet')
         existing = self._existing_map_files(name)
         if existing and not cmd.get('overwrite'):
             raise RuntimeError(f'Map {name} already exists')
@@ -1061,24 +1112,32 @@ class WebConsole(Node):
                 archive.mkdir(parents=True)
                 for path in existing:
                     shutil.move(str(path), str(archive / path.name))
-                archived = f'; previous files moved to {archive}'
+                archived = f' Previous files moved to {archive}.'
             stem = self.maps_directory / name
-            request = SlamSaveMap.Request()
-            request.name = StringMsg(data=str(stem))
-            result = self._call_slam(self.slam_save, request, 30.0)
-            if result.result != SlamSaveMap.Response.RESULT_SUCCESS:
-                raise RuntimeError(
-                    f'SLAM map save failed (result {result.result})')
+            write_map_files(grid, stem)
+            message = (f'Saved {name}.yaml and {name}.pgm '
+                       f'({grid.info.width}x{grid.info.height} cells)')
             if cmd.get('session', True):
                 request = SerializePoseGraph.Request()
                 request.filename = str(stem)
-                result = self._call_slam(self.slam_serialize, request, 60.0)
-                if result.result != SerializePoseGraph.Response.RESULT_SUCCESS:
+                try:
+                    result = self._call_slam(self.slam_serialize, request, 60.0)
+                    ok = result.result == SerializePoseGraph.Response.RESULT_SUCCESS
+                except RuntimeError:
+                    ok = False
+                session_files = [stem.with_suffix(s) for s in ('.posegraph', '.data')]
+                if not ok or not all(p.exists() and p.stat().st_size
+                                     for p in session_files):
                     raise RuntimeError(
-                        'Map saved, but the editable session failed '
-                        f'(result {result.result})')
-            saved = ', '.join(p.name for p in self._existing_map_files(name))
-            return f'Saved {saved}{archived}'
+                        f'{message}, but the editable session (.posegraph/.data) '
+                        'was NOT saved. The map is usable for navigation; '
+                        'save again to retry the session.')
+                message += ' and the editable session'
+            missing = [p.name for p in (stem.with_suffix('.yaml'), stem.with_suffix('.pgm'))
+                       if not (p.exists() and p.stat().st_size)]
+            if missing:
+                raise RuntimeError(f'Save failed: missing {", ".join(missing)}')
+            return message + '.' + archived
         finally:
             self.map_saving = ''
             self._publish_mapping()
