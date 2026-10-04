@@ -243,3 +243,57 @@ dialog input { margin-bottom: 12px; }
   .panel { padding: 12px 16px; }
   .wplist { max-height: none; }
 }
+
+/* ---- Mode ---------------------------------------------------------- */
+.mode-pill {
+  display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  font: inherit; font-weight: 600; color: var(--text); cursor: pointer;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 5px 12px;
+}
+.mode-pill:hover { border-color: var(--muted); }
+.mode-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+.mode-pill[data-mode="operations"] .mode-dot,
+.mode-pill[data-mode="localization"] .mode-dot { background: var(--ok); }
+.mode-pill[data-mode="mapping"] .mode-dot { background: #a855f7; }
+.mode-pill[data-mode="idle"] .mode-dot { background: var(--muted); }
+.mode-pill.busy .mode-dot { background: var(--warn); animation: pulse 1s infinite; }
+.mode-caret { color: var(--muted); font-size: 11px; }
+@keyframes pulse { 50% { opacity: .3; } }
+
+.banner.info {
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-bottom-color: var(--accent);
+}
+.spinner {
+  width: 14px; height: 14px; border-radius: 50%; flex: none;
+  border: 2px solid var(--border); border-top-color: var(--accent);
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.lead { margin: 0 0 12px; }
+.card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  margin-bottom: 12px; background: var(--surface-2);
+}
+.card h4 { margin: 0 0 4px; font-size: 15px; }
+.card p { margin: 0 0 10px; }
+.btn.wide { width: 100%; }
+.maplist { display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; margin-bottom: 10px; }
+.maplist label {
+  flex-direction: row; align-items: center; gap: 8px; color: var(--text);
+  padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); cursor: pointer; font-size: 13px;
+}
+.maplist label:has(input:checked) { border-color: var(--accent); }
+.maplist .meta { margin-left: auto; color: var(--muted); font-size: 12px; }
+.maplist .empty { color: var(--muted); font-size: 13px; }
+
+.map-empty {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 24px;
+  text-align: center; color: var(--muted); pointer-events: none;
+}
+#mode-dlg { width: min(460px, calc(100vw - 32px)); }
+#mode-dlg .card { background: var(--surface); }
+.mode-current { margin: 0 0 12px; font-size: 13px; }

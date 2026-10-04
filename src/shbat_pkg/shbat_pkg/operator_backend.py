@@ -65,6 +65,10 @@ class OperatorBackend(Node):
         self.declare_parameter('max_angular_speed', 1.20)
         self.declare_parameter('active_map', '')
         self.declare_parameter('localization_backend', 'amcl')
+        # Mode of a stack started without operator_mode_manager (for example
+        # the Live or New Mapping desktop shortcuts). /operator/mode_state
+        # from the mode manager overrides it.
+        self.declare_parameter('mode', '')
 
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)
@@ -93,7 +97,11 @@ class OperatorBackend(Node):
         self.remote_active = False
         self.last_remote_command = 0.0
         self.last_sequence = None
-        self.mode = OperatorStatus.MODE_IDLE
+        self.mode = {
+            'mapping': OperatorStatus.MODE_MAPPING,
+            'localization': OperatorStatus.MODE_LOCALIZATION,
+            'operations': OperatorStatus.MODE_OPERATIONS,
+        }.get(str(self.get_parameter('mode').value), OperatorStatus.MODE_IDLE)
         self.active_map = str(self.get_parameter('active_map').value)
         self.navigation_state = 'idle'
         self.active_operation = ''
@@ -1545,8 +1553,21 @@ class OperatorBackend(Node):
                 return response
         self._stop_remote()
         if not self.mode_client.wait_for_service(timeout_sec=1.0):
-            response.message = 'Mode manager is unavailable'
+            response.message = (
+                'Mode switching is unavailable: this stack was not started '
+                'by the mode manager'
+            )
             return response
+        if abs(self.linear_velocity) > 0.01 or abs(self.angular_velocity) > 0.02:
+            response.message = 'Robot must be stationary before switching mode'
+            return response
+        # Switching stops the navigation stack; cancel any goal cleanly first.
+        self.cancel_requested = True
+        self.goal_generation += 1
+        if self.current_goal_handle is not None:
+            self.current_goal_handle.cancel_goal_async()
+            self.current_goal_handle = None
+        self.navigation_state = 'idle'
         internal = SetMode.Request()
         internal.mode = request.mode
         internal.map_id = request.map_id
@@ -1559,7 +1580,9 @@ class OperatorBackend(Node):
         response.success = result.success
         response.message = result.message
         if result.success and request.mode in ('localization', 'operations'):
-            if not self._wait_for_health(30.0):
+            # The full stack (motors, lidar, ZED, Nav2) needs longer than the
+            # navigation layer alone to become healthy on the Jetson.
+            if not self._wait_for_health(90.0):
                 response.success = False
                 response.message = (
                     'Mode started but map/scan/TF did not become healthy; '

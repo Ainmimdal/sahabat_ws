@@ -55,6 +55,10 @@ formatting with operational behavior changes; keep cleanup patches reviewable.
 
 Canonical entry points are:
 
+- `robot.launch.py` for the Sahabat Robot app: operator backend, mode
+  manager (`stack:=full`) and web console. Mapping and Operating modes start
+  the same stacks as the New Mapping and Live shortcuts. Do not run it
+  alongside those shortcuts.
 - `bringup.launch.py` for hardware bringup without Nav2
 - `navigation.launch.py` for `odom_only`, `mapping`, or `localization`
 - `operations.launch.py` for gallery localization and patrol

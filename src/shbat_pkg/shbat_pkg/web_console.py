@@ -57,7 +57,6 @@ from sahabat_interfaces.srv import (
     GetWaypointGraph,
     ListMaps,
     ListWaypointSets,
-    LoadMap,
     LocalizationRecovery,
     ManageAprilTagLandmark,
     ManageWaypointSet,
@@ -65,6 +64,7 @@ from sahabat_interfaces.srv import (
     SaveDock,
     SaveWaypointGraph,
     SetEmergencyStop,
+    SetMode,
 )
 from sensor_msgs.msg import Image, LaserScan
 from slam_toolbox.srv import SaveMap as SlamSaveMap
@@ -129,7 +129,7 @@ def write_map_files(grid, stem: Path) -> list:
             lut[value] = 0
         else:
             lut[value] = 205
-    raw = bytes(v & 0xFF for v in grid.data).translate(bytes(lut))
+    raw = grid_bytes(grid.data).translate(bytes(lut))
     rows = [raw[row * width:(row + 1) * width]
             for row in range(height - 1, -1, -1)]
     pgm = f'P5\n{width} {height}\n255\n'.encode() + b''.join(rows)
@@ -158,6 +158,14 @@ def stamp_ns(stamp) -> int:
     return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
+def grid_bytes(data) -> bytes:
+    """OccupancyGrid data as unsigned bytes (fast path for rclpy arrays)."""
+    try:
+        return data.tobytes()
+    except AttributeError:
+        return bytes(v & 0xFF for v in data)
+
+
 def encode_map_png(width: int, height: int, data) -> bytes:
     """Encode an OccupancyGrid as an RGBA PNG (row 0 = top = max y)."""
     free = b'\xf4\xf5\xf7\xff'
@@ -174,7 +182,7 @@ def encode_map_png(width: int, height: int, data) -> bytes:
         else:
             shade = int(244 - (signed - 25) * 4)
             lut.append(bytes((shade, shade, shade + 2, 255)))
-    raw = bytes(v & 0xFF for v in data)
+    raw = grid_bytes(data)
     rows = []
     for row in range(height - 1, -1, -1):
         start = row * width
@@ -478,6 +486,8 @@ class WebConsole(Node):
             callback_group=self.group)
         sub(String, '/localization/startup_status', self._startup, latched,
             callback_group=self.group)
+        sub(String, '/operator/mode_state', self._mode_state_message, latched,
+            callback_group=self.group)
         sub(String, '/operator/waypoints_changed',
             lambda _m: self._schedule_graph_refresh(), latched,
             callback_group=self.group)
@@ -490,8 +500,10 @@ class WebConsole(Node):
                             callback_group=self.group),
             'maps': client(ListMaps, '/operator/maps/list',
                            callback_group=self.group),
-            'map_load': client(LoadMap, '/operator/maps/load',
+            'set_mode': client(SetMode, '/operator/set_mode',
                                callback_group=self.group),
+            'mode_manager': client(SetMode, '/operator/internal/set_mode',
+                                   callback_group=self.group),
             'sets': client(ListWaypointSets, '/operator/waypoint_sets/list',
                            callback_group=self.group),
             'set_manage': client(ManageWaypointSet,
@@ -531,6 +543,11 @@ class WebConsole(Node):
             SerializePoseGraph, '/slam_toolbox/serialize_map',
             callback_group=self.group)
         self.mapping_active = None
+        self.map_crc = 0
+        self.map_saved_crc = 0
+        self.mode_state = {'mode': '', 'map_id': '', 'detail': ''}
+        self.managed = False
+        self.switching = ''
         self.map_saving = ''
         self.create_timer(2.0, self._mapping_timer, callback_group=self.group)
 
@@ -542,6 +559,7 @@ class WebConsole(Node):
     # ------------------------------------------------------------------ ROS in
     def _map(self, message: OccupancyGrid) -> None:
         self.latest_map = message
+        self.map_crc = zlib.crc32(grid_bytes(message.data))
         info = message.info
         png = encode_map_png(info.width, info.height, message.data)
         with self.lock:
@@ -816,10 +834,13 @@ class WebConsole(Node):
             result = self._call('lease', ControlLease.Request(
                 action=ControlLease.Request.RENEW, lease_id=self.lease_id),
                 timeout=2.0)
-            ok = result.success
-        except RuntimeError:
-            ok = False
-        if not ok:
+        except RuntimeError as error:
+            # A slow or briefly unavailable backend is not a lost lease; retry
+            # next tick. The backend itself expires the lease after 5 s.
+            self.get_logger().warning(f'Lease renewal delayed: {error}')
+            return
+        if not result.success:
+            self.get_logger().warning(f'Control lease lost: {result.message}')
             with self.lock:
                 self._drop_lease(release=False)
 
@@ -1010,15 +1031,6 @@ class WebConsole(Node):
             'maps': [{'id': m.map_id, 'name': m.display_name} for m in result.maps],
         }
 
-    def op_load_map(self, cmd, client):
-        lease = self._require_lease(client)
-        result = self._call('map_load', LoadMap.Request(
-            map_id=str(cmd['map_id']), lease_id=lease), timeout=30.0)
-        self._schedule_graph_refresh()
-        if not result.success:
-            raise RuntimeError(result.message)
-        return result.message
-
     def op_recovery(self, cmd, client):
         lease = self._require_lease(client)
         action = (LocalizationRecovery.Request.START if cmd.get('start')
@@ -1054,15 +1066,71 @@ class WebConsole(Node):
     def _mapping_timer(self) -> None:
         active = self.slam_save.service_is_ready()
         if active != self.mapping_active:
+            if active:
+                # A new SLAM session starts with nothing saved.
+                self.map_saved_crc = 0
             self.mapping_active = active
             self._publish_mapping()
+        elif active:
+            self._publish_mapping()
+        managed = self.services_['mode_manager'].service_is_ready()
+        if managed != self.managed:
+            self.managed = managed
+            self._publish_mode()
 
     def _publish_mapping(self) -> None:
         self.hub.publish('mapping', {
             'active': bool(self.mapping_active),
             'saving': self.map_saving,
             'directory': str(self.maps_directory),
+            # The live map changed since the last successful save.
+            'unsaved': bool(self.mapping_active)
+            and self.map_crc != self.map_saved_crc,
         })
+
+    def _mode_state_message(self, message) -> None:
+        try:
+            state = json.loads(message.data)
+        except ValueError:
+            return
+        self.mode_state = {
+            'mode': str(state.get('mode', '')),
+            'map_id': str(state.get('map_id', '')),
+            'detail': str(state.get('detail', '')),
+        }
+        self._publish_mode()
+
+    def _publish_mode(self) -> None:
+        self.hub.publish('mode', {
+            **self.mode_state,
+            'managed': self.managed,
+            'switching': self.switching,
+        })
+
+    def op_set_mode(self, cmd, client):
+        """Switch idle / mapping / operations through the mode manager."""
+        lease = self._require_lease(client)
+        mode = str(cmd.get('mode', ''))
+        if mode not in ('idle', 'mapping', 'operations'):
+            raise ValueError('mode must be idle, mapping or operations')
+        if not self.managed:
+            raise RuntimeError(
+                'Mode switching needs the Sahabat Robot launcher; this stack '
+                'was started by a fixed-mode shortcut')
+        if self.switching:
+            raise RuntimeError(f'Already switching to {self.switching}')
+        self.switching = mode
+        self._publish_mode()
+        try:
+            result = self._call('set_mode', SetMode.Request(
+                mode=mode, map_id=str(cmd.get('map_id', '')), lease_id=lease),
+                timeout=150.0)
+        finally:
+            self.switching = ''
+            self._publish_mode()
+        if not result.success:
+            raise RuntimeError(result.message)
+        return result.message
 
     def _existing_map_files(self, name: str):
         stem = self.maps_directory / name
@@ -1137,6 +1205,7 @@ class WebConsole(Node):
                        if not (p.exists() and p.stat().st_size)]
             if missing:
                 raise RuntimeError(f'Save failed: missing {", ".join(missing)}')
+            self.map_saved_crc = zlib.crc32(grid_bytes(grid.data))
             return message + '.' + archived
         finally:
             self.map_saving = ''
@@ -1164,6 +1233,19 @@ class WebConsole(Node):
             maps.append({
                 'id': path.stem,
                 'session': path.with_suffix('.posegraph').exists(),
+                'modified': path.stat().st_mtime,
+            })
+        # Older maps saved by operator_backend: <maps>/<id>/map.yaml.
+        known = {item['id'] for item in maps}
+        for path in sorted(self.maps_directory.glob('*/map.yaml')):
+            map_id = path.parent.name
+            if map_id.startswith('.') or map_id in known:
+                continue
+            if not VALID_MAP_NAME.fullmatch(map_id):
+                continue
+            maps.append({
+                'id': map_id,
+                'session': (path.parent / 'session.posegraph').exists(),
                 'modified': path.stat().st_mtime,
             })
         maps.sort(key=lambda item: item['modified'], reverse=True)

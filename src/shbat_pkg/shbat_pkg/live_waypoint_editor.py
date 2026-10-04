@@ -168,6 +168,9 @@ def main(argv=None):
         '-p', f'maps_directory:={maps_directory}',
         '-p', f'active_map:={map_id}',
         '-p', f'localization_backend:={args.localization_backend}',
+        # No mode manager here: tell the backend it is operating so
+        # mode-gated actions (for example global relocalization) work.
+        '-p', 'mode:=operations',
     ]
     web_cmd = [
         'ros2', 'run', 'shbat_pkg', 'web_console',

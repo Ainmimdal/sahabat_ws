@@ -26,7 +26,10 @@ const S = {
   scan: null, plan: null,
   tags: null, startup: '',
   lease: { held: false, client: '' },
-  mapping: { active: false, saving: '' },
+  mapping: { active: false, saving: '', unsaved: false },
+  mode: { mode: '', map_id: '', detail: '', managed: false, switching: '' },
+  mapFiles: [],
+  startMap: '',
   server: null,          // last waypoints payload from robot
   draft: [],             // editable waypoint copy
   dirty: false,
@@ -75,8 +78,23 @@ function dialog({ title, text = '', input = null, okText = 'OK', danger = false 
   $('dlg-ok').textContent = okText;
   $('dlg-ok').style.background = danger ? 'var(--bad)' : '';
   $('dlg-ok').style.borderColor = danger ? 'var(--bad)' : '';
+  // Resolve from the buttons themselves: the dialog 'close' event can be
+  // deferred by the browser (seen in background tabs).
   return new Promise((resolve) => {
-    dlg.onclose = () => resolve(dlg.returnValue === 'ok' ? (input === null ? true : inp.value.trim()) : null);
+    let done = false;
+    const finish = (ok) => {
+      if (done) return;
+      done = true;
+      $('dlg-ok').onclick = $('dlg-cancel').onclick = dlg.oncancel = dlg.onclose = null;
+      if (dlg.open) dlg.close();
+      resolve(ok ? (input === null ? true : inp.value.trim()) : null);
+    };
+    $('dlg-ok').onclick = (e) => { e.preventDefault(); finish(true); };
+    $('dlg-cancel').onclick = (e) => { e.preventDefault(); finish(false); };
+    dlg.oncancel = () => finish(false);
+    inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); finish(true); } };
+    dlg.onclose = () => finish(dlg.returnValue === 'ok');
+    dlg.returnValue = '';
     dlg.showModal();
     if (input !== null) inp.focus();
   });
@@ -86,9 +104,9 @@ function dialog({ title, text = '', input = null, okText = 'OK', danger = false 
 function connect() {
   const es = new EventSource('api/stream');
   es.onopen = () => { S.connected = true; renderHeader(); };
-  es.onerror = () => { S.connected = false; renderHeader(); };
+  es.onerror = () => { S.connected = false; renderHeader(); applyMode(); };
   const on = (name, fn) => es.addEventListener(name, (e) => fn(JSON.parse(e.data)));
-  on('status', (d) => { S.status = d; renderHeader(); renderPanels(); if (S.follow) centerOnRobot(); draw(); });
+  on('status', (d) => { S.status = d; applyMode(); renderHeader(); renderPanels(); if (S.follow) centerOnRobot(); draw(); });
   on('map', (d) => {
     const img = new Image();
     img.onload = () => {
@@ -108,11 +126,10 @@ function connect() {
   on('lease', (d) => { S.lease = d; renderHeader(); renderPanels(); });
   on('waypoints', onWaypoints);
   on('mapping', (d) => {
-    const started = d.active && !S.mapping.active;
     S.mapping = d;
-    renderHeader(); renderMapping();
-    if (started) { document.querySelector('[data-tab="mapping"]').click(); loadMapFiles(); }
+    applyMode(); renderHeader(); renderMapping();
   });
+  on('mode', (d) => { S.mode = d; applyMode(); renderPanels(); });
 }
 
 setInterval(() => {
@@ -123,15 +140,17 @@ setInterval(() => {
 function chip(el, text, cls) {
   el.textContent = text;
   el.className = `chip ${cls || ''}`;
+  const modes = el.dataset.modes, mode = currentMode();
+  if (modes && mode && !modes.split(' ').includes(mode)) el.classList.add('hidden');
 }
 function renderHeader() {
   $('conn').classList.toggle('on', S.connected);
   const st = S.status;
   if (st) {
-    chip($('chip-map'), st.active_map || 'no map');
-    chip($('chip-mode'), st.mode);
     chip($('chip-nav'), st.operation ? `${st.navigation_state}: ${st.operation}` : st.navigation_state,
       st.navigation_state === 'failed' ? 'bad' : '');
+    // Only worth a chip while something is happening.
+    if (st.navigation_state === 'idle' && !st.operation) $('chip-nav').classList.add('hidden');
     const localized = st.localized && st.frame === 'map';
     if (S.mapping.active) chip($('chip-loc'), 'Mapping', 'ok');
     else chip($('chip-loc'), localized ? 'Localized' : 'Not localized', localized ? 'ok' : 'warn');
@@ -322,10 +341,12 @@ function polyline(points, color, width, dash = []) {
 function render() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, W(), H());
+  // Idle: nothing is running, so there is nothing truthful to draw.
+  if (currentMode() === 'idle') return;
   const accent = css('--accent');
   const text = css('--text');
 
-  if (S.mapImg && S.map) {
+  if (S.mapImg && S.map && currentMode() !== 'idle') {
     const m = S.map;
     const [sx, sy] = toScreen(m.origin_x, m.origin_y + m.height * m.resolution);
     ctx.save();
@@ -350,7 +371,7 @@ function render() {
     ctx.stroke();
   }
 
-  if (S.layers.scan && S.scan && S.scan.frame === (S.status?.frame || 'map')) {
+  if (S.layers.scan && S.scan && currentMode() !== 'idle' && S.scan.frame === (S.status?.frame || 'map')) {
     ctx.fillStyle = '#ef4444';
     const p = S.scan.points, r = Math.max(1.5, Math.min(3, view.scale * 0.03));
     for (let i = 0; i < p.length; i += 2) {
@@ -359,16 +380,19 @@ function render() {
     }
   }
 
-  if (S.layers.plan && S.plan) polyline(S.plan.points, '#22c55e', 3);
+  if (S.layers.plan && S.plan && currentMode() !== 'idle') polyline(S.plan.points, '#22c55e', 3);
 
+  // Waypoints, routes, dock and tags belong to a saved map; a new SLAM map
+  // has its own frame, so they are meaningless while mapping.
+  const onSavedMap = currentMode() !== 'mapping';
   // Waypoint tour order and preferred routes.
-  const wps = S.draft;
+  const wps = onSavedMap ? S.draft : [];
   if (wps.length > 1) {
     const pts = [];
     wps.filter((w) => w.enabled).forEach((w) => pts.push(w.x, w.y));
     polyline(pts, 'rgba(37,99,235,.45)', 2, [6, 6]);
   }
-  if (S.layers.routes && S.server) {
+  if (onSavedMap && S.layers.routes && S.server) {
     const byId = Object.fromEntries(wps.map((w) => [w.id, w]));
     for (const seg of S.server.segments || []) {
       const a = byId[seg.from], b = byId[seg.to];
@@ -380,7 +404,7 @@ function render() {
     }
   }
 
-  if (S.layers.tags && S.tags) {
+  if (onSavedMap && S.layers.tags && S.tags) {
     for (const t of S.tags.tags) {
       if (!t.saved) continue;
       const [sx, sy] = toScreen(t.x, t.y);
@@ -391,7 +415,7 @@ function render() {
     }
   }
 
-  const dock = S.server?.dock;
+  const dock = onSavedMap ? S.server?.dock : null;
   if (dock) {
     const [sx, sy] = toScreen(dock.x, dock.y);
     ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 2.5;
@@ -418,7 +442,7 @@ function render() {
     }
   });
 
-  const st = S.status;
+  const st = currentMode() === 'idle' ? null : S.status;
   if (st) {
     const [sx, sy] = toScreen(st.x, st.y);
     const r = Math.max(8, 0.3 * view.scale);
@@ -449,6 +473,7 @@ let drag = null;
 let pinch = null;
 
 function pickWaypoint(sx, sy) {
+  if (!['operations', 'localization'].includes(currentMode())) return null;
   const sel = S.draft.find((w) => w.id === S.selected);
   if (sel) {
     const [hx, hy] = headingHandle(sel);
@@ -851,7 +876,9 @@ function renderPanels() {
   ]);
   kv($('sys-kv'), [
     ['Diagnostic', st.diagnostic_message || st.diagnostic, st.diagnostic === 'ok' ? 'ok' : st.diagnostic === 'warn' ? 'warn' : 'bad'],
-    ['Mode', st.mode],
+    ['Mode', `${currentMode() || '—'}${S.mode.managed ? ' (switchable)' : ' (fixed by launcher)'}`],
+    ['Mode manager', S.mode.detail || (S.mode.managed ? 'ready' : 'not running')],
+    ['Active map', st.active_map || '—'],
     ['Navigation', st.navigation_state],
     ['Map', ...yes(st.map_ok)],
     ['Lidar', ...yes(st.scan_ok)],
@@ -866,8 +893,8 @@ document.querySelectorAll('[data-tab]').forEach((b) => {
   b.onclick = () => {
     document.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('[data-panel]').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== b.dataset.tab));
-    if (b.dataset.tab === 'system') loadMaps();
     if (b.dataset.tab === 'mapping') { loadMapFiles(); renderMapping(); }
+    if (b.dataset.tab === 'start') loadMapFiles();
     store('sahabat.tab', b.dataset.tab);
   };
 });
@@ -875,25 +902,150 @@ document.querySelectorAll('[data-layer]').forEach((c) => {
   c.onchange = () => { S.layers[c.dataset.layer] = c.checked; draw(); };
 });
 
-async function loadMaps() {
-  try {
-    const r = await cmd('list_maps', {}, true);
-    const sel = $('map-select');
-    sel.innerHTML = '';
-    for (const m of r.maps) {
-      const o = document.createElement('option');
-      o.value = m.id; o.textContent = m.name && m.name !== m.id ? `${m.name} (${m.id})` : m.id;
-      sel.appendChild(o);
-    }
-    sel.value = r.active;
-  } catch (_e) { /* backend offline */ }
+// --------------------------------------------------------------------- mode
+const MODE_TEXT = { idle: 'Idle', mapping: 'Mapping', operations: 'Operating', localization: 'Localizing' };
+function currentMode() {
+  if (!S.connected || !S.status) return '';
+  if (S.mapping.active) return 'mapping';
+  return S.status.mode || 'idle';
 }
-$('map-load').onclick = async () => {
-  const id = $('map-select').value;
-  if (!id || id === S.status?.active_map) return;
-  if (await dialog({ title: `Load map “${id}”?`, text: 'The robot must be stationary. You will need to localize again afterwards.', okText: 'Load' })) {
-    safe(cmd('load_map', { map_id: id }));
+
+let lastMode = null;
+function applyMode() {
+  const mode = currentMode();
+  const switching = S.mode.switching;
+  const pill = $('mode-pill');
+  pill.dataset.mode = mode;
+  pill.classList.toggle('busy', !!switching);
+  const map = S.status?.active_map;
+  $('mode-label').textContent = switching
+    ? `Starting ${MODE_TEXT[switching] || switching}…`
+    : !mode ? 'Connecting…'
+    : mode === 'operations' || mode === 'localization' ? `${MODE_TEXT[mode]}${map ? ` · ${map}` : ''}`
+    : MODE_TEXT[mode] || mode;
+
+  $('switch-banner').classList.toggle('hidden', !switching);
+  if (switching) {
+    $('switch-text').textContent = switching === 'idle'
+      ? 'Stopping the robot software…'
+      : `Starting ${MODE_TEXT[switching].toLowerCase()}: motors, lidar${switching === 'operations' ? ', camera' : ''} and navigation. This takes 30–90 s.`;
   }
+
+  // Show only what works in this mode.
+  document.querySelectorAll('[data-modes]').forEach((el) => {
+    el.classList.toggle('hidden', !!mode && !el.dataset.modes.split(' ').includes(mode));
+  });
+  if (!(document.querySelector(`[data-tool="${S.tool}"]`)?.offsetParent)) setTool('pan');
+  const active = document.querySelector('.tab.active');
+  if (mode !== lastMode || !active || active.classList.contains('hidden')) {
+    const preferred = { idle: 'start', mapping: 'mapping', operations: 'waypoints', localization: 'localize' }[mode];
+    const saved = store('sahabat.tab');
+    const pick = [saved, preferred].map((t) => t && document.querySelector(`[data-tab="${t}"]`))
+      .find((b) => b && !b.classList.contains('hidden'))
+      || document.querySelector('.tab:not(.hidden)');
+    if (pick && mode !== lastMode) pick.click();
+  }
+  lastMode = mode;
+
+  const empty = $('map-empty');
+  empty.classList.toggle('hidden', mode !== 'idle');
+  empty.textContent = 'Robot idle. Start operating on a map or create a new one.';
+  draw();
+  if (mode === 'idle') loadMapFilesOnce();
+}
+
+let mapFilesLoaded = false;
+function loadMapFilesOnce() { if (!mapFilesLoaded) { mapFilesLoaded = true; loadMapFiles(); } }
+
+function renderStartMaps(container = $('start-maps'), onPick = null) {
+  container.innerHTML = '';
+  const last = S.startMap || store('sahabat.startMap') || S.mapFiles[0]?.id || '';
+  if (!S.mapFiles.length) {
+    container.innerHTML = '<div class="empty">No saved maps yet. Create one first.</div>';
+  }
+  for (const m of S.mapFiles) {
+    const label = document.createElement('label');
+    label.innerHTML = '<input type="radio" name="' + container.id + '-map"><span class="name"></span><span class="meta"></span>';
+    const input = label.querySelector('input');
+    input.value = m.id;
+    input.checked = m.id === last;
+    label.querySelector('.name').textContent = m.id;
+    label.querySelector('.meta').textContent = new Date(m.modified * 1000).toLocaleDateString();
+    input.onchange = () => { S.startMap = m.id; store('sahabat.startMap', m.id); if (onPick) onPick(m.id); updateStartButtons(); };
+    container.appendChild(label);
+  }
+  if (last && S.mapFiles.some((m) => m.id === last)) S.startMap = last;
+  updateStartButtons();
+}
+function updateStartButtons() {
+  const ok = !!S.startMap && !S.mode.switching;
+  $('start-operate').disabled = !ok;
+  $('start-operate').textContent = S.startMap ? `Start operating on ${S.startMap}` : 'Start operating';
+  $('start-mapping').disabled = !!S.mode.switching;
+}
+
+async function switchMode(mode, mapId = '') {
+  if (!S.mode.managed) {
+    return toast('This robot was started from a fixed-mode shortcut. Close it and start “Sahabat Robot” to switch modes.', 'err');
+  }
+  if (!iHaveControl()) return toast('Take control first', 'err');
+  if (currentMode() === 'mapping' && S.mapping.unsaved) {
+    const go = await dialog({
+      title: 'Discard the unsaved map?',
+      text: 'The current map has changes that are not saved. Switching mode ends this mapping session and they will be lost.',
+      okText: 'Discard and switch', danger: true,
+    });
+    if (!go) return;
+  }
+  const text = {
+    operations: `Start operating on “${mapId}”? The robot stack starts with this map. Localize before driving tours.`,
+    mapping: 'Start a new mapping session? The robot stack starts with SLAM, so drive slowly to build the map.',
+    idle: 'Stop the robot software? Motors, lidar and navigation turn off. Control and E-stop stay available.',
+  }[mode];
+  const ok = await dialog({ title: `Switch to ${MODE_TEXT[mode]}`, text, okText: mode === 'idle' ? 'Stop' : 'Start' });
+  if (!ok) return;
+  $('mode-dlg').close();
+  try { await cmd('set_mode', { mode, map_id: mapId }); } catch (_e) { /* toast shown */ }
+}
+$('start-operate').onclick = () => switchMode('operations', S.startMap);
+$('start-mapping').onclick = () => switchMode('mapping');
+
+$('mode-pill').onclick = async () => {
+  const body = $('mode-dlg-body');
+  const mode = currentMode();
+  body.innerHTML = '';
+  const cur = document.createElement('p');
+  cur.className = 'mode-current';
+  cur.textContent = `Now: ${MODE_TEXT[mode] || 'unknown'}${S.status?.active_map && mode !== 'mapping' && mode !== 'idle' ? ` on ${S.status.active_map}` : ''}.`;
+  body.appendChild(cur);
+  if (!S.mode.managed) {
+    const p = document.createElement('p');
+    p.className = 'muted small';
+    p.textContent = 'This robot was started from a fixed-mode desktop shortcut, so modes can’t be switched here. To switch from the tablet, close that terminal on the robot and start “Sahabat Robot”.';
+    body.appendChild(p);
+  } else {
+    await loadMapFiles();
+    const op = document.createElement('div');
+    op.className = 'card';
+    op.innerHTML = '<h4>Operate on a map</h4><div class="maplist" id="dlg-maps"></div><button type="button" class="btn primary wide" id="dlg-operate">Start operating</button>';
+    body.appendChild(op);
+    renderStartMaps(op.querySelector('#dlg-maps'), () => { op.querySelector('#dlg-operate').textContent = `Start operating on ${S.startMap}`; });
+    op.querySelector('#dlg-operate').textContent = S.startMap ? `Start operating on ${S.startMap}` : 'Start operating';
+    op.querySelector('#dlg-operate').onclick = () => S.startMap && switchMode('operations', S.startMap);
+    const mp = document.createElement('div');
+    mp.className = 'card';
+    mp.innerHTML = '<h4>Create a new map</h4><button type="button" class="btn wide" id="dlg-mapping">Start mapping</button>';
+    body.appendChild(mp);
+    mp.querySelector('#dlg-mapping').onclick = () => switchMode('mapping');
+    if (mode && mode !== 'idle') {
+      const st = document.createElement('div');
+      st.className = 'card';
+      st.innerHTML = '<h4>Stop</h4><p class="muted small">Turn off motors, lidar and navigation.</p><button type="button" class="btn wide" id="dlg-idle">Go idle</button>';
+      body.appendChild(st);
+      st.querySelector('#dlg-idle').onclick = () => switchMode('idle');
+    }
+  }
+  $('mode-dlg').showModal();
 };
 
 // ------------------------------------------------------------------ mapping
@@ -902,10 +1054,12 @@ function renderMapping() {
   const el = $('mapping-state');
   if (m.saving) {
     el.className = 'notice warn'; el.textContent = `Saving map “${m.saving}”…`;
+  } else if (m.active && m.unsaved) {
+    el.className = 'notice warn'; el.textContent = 'Mapping. The map has unsaved changes. Save before switching mode or closing.';
   } else if (m.active) {
-    el.className = 'notice ok'; el.textContent = 'SLAM mapping is running. Drive the robot to build the map.';
+    el.className = 'notice ok'; el.textContent = 'Mapping. Everything so far is saved.';
   } else {
-    el.className = 'notice'; el.textContent = 'Not mapping. Start the “Sahabat New Mapping (Web Console)” shortcut on the robot to build a new map.';
+    el.className = 'notice'; el.textContent = 'Not mapping. Use the mode button at the top to start a new map.';
   }
   const map = S.map;
   const b = S.mapBounds;
@@ -933,6 +1087,8 @@ async function loadMapFiles() {
       body.appendChild(tr);
     }
     if (!r.maps.length) body.innerHTML = '<tr><td colspan="3" class="muted">No saved maps.</td></tr>';
+    S.mapFiles = r.maps;
+    renderStartMaps();
   } catch (_e) { /* console offline */ }
 }
 
@@ -1124,8 +1280,6 @@ document.addEventListener('visibilitychange', updateCamera);
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', updateCamera));
 
 // --------------------------------------------------------------------- init
-const savedTab = store('sahabat.tab');
-if (savedTab) document.querySelector(`[data-tab="${savedTab}"]`)?.click();
 setTool('pan');
 renderMapping();
 connect();

@@ -10,12 +10,13 @@
 <body>
 <header class="topbar">
   <div class="brand"><span id="conn" class="dot" title="Connection"></span>Sahabat</div>
+  <button id="mode-pill" class="mode-pill" title="Robot mode — tap to switch">
+    <span class="mode-dot"></span><span id="mode-label">Connecting…</span><span class="mode-caret">▾</span>
+  </button>
   <div class="chips">
-    <span class="chip" id="chip-map">map —</span>
-    <span class="chip" id="chip-mode">—</span>
-    <span class="chip" id="chip-nav">—</span>
-    <span class="chip" id="chip-loc">Localization</span>
-    <span class="chip" id="chip-scan">Lidar</span>
+    <span class="chip" id="chip-nav" data-modes="operations localization mapping">—</span>
+    <span class="chip" id="chip-loc" data-modes="operations localization mapping">Localization</span>
+    <span class="chip" id="chip-scan" data-modes="operations localization mapping">Lidar</span>
     <span class="chip" id="chip-motor">Motors</span>
     <span class="chip" id="chip-batt">Battery —</span>
   </div>
@@ -24,6 +25,8 @@
     <button id="btn-estop" class="btn estop">E-STOP</button>
   </div>
 </header>
+
+<div id="switch-banner" class="banner info hidden"><span class="spinner"></span><span id="switch-text"></span></div>
 
 <div id="estop-banner" class="banner hidden">
   <strong>E-stop is active.</strong> The robot will not move.
@@ -35,9 +38,9 @@
     <canvas id="map"></canvas>
     <div class="toolbar" id="tools">
       <button data-tool="pan" class="tool active" title="Select / pan (Esc)">Select</button>
-      <button data-tool="pose" class="tool" title="2D pose estimate: press at robot position, drag toward heading">Pose estimate</button>
-      <button data-tool="goal" class="tool" title="Nav goal: press at target, drag toward heading">Nav goal</button>
-      <button data-tool="add" class="tool" title="Add waypoint: press at position, drag toward heading">+ Waypoint</button>
+      <button data-tool="pose" data-modes="operations localization" class="tool" title="2D pose estimate: press at robot position, drag toward heading">Pose estimate</button>
+      <button data-tool="goal" data-modes="operations localization" class="tool" title="Nav goal: press at target, drag toward heading">Nav goal</button>
+      <button data-tool="add" data-modes="operations localization" class="tool" title="Add waypoint: press at position, drag toward heading">+ Waypoint</button>
     </div>
     <div class="zoombar">
       <button id="zoom-in" class="tool" title="Zoom in">+</button>
@@ -56,16 +59,34 @@
     </button>
     <div class="hint" id="hint"></div>
     <div class="readout" id="readout"></div>
+    <div class="map-empty hidden" id="map-empty"></div>
   </section>
 
   <aside class="side">
     <nav class="tabs">
-      <button data-tab="waypoints" class="tab active">Waypoints</button>
-      <button data-tab="drive" class="tab">Drive</button>
-      <button data-tab="localize" class="tab">Localize</button>
-      <button data-tab="mapping" class="tab">Map</button>
+      <button data-tab="start" data-modes="idle" class="tab">Start</button>
+      <button data-tab="waypoints" data-modes="operations localization" class="tab active">Waypoints</button>
+      <button data-tab="drive" data-modes="operations localization mapping" class="tab">Drive</button>
+      <button data-tab="localize" data-modes="operations localization" class="tab">Localize</button>
+      <button data-tab="mapping" data-modes="mapping" class="tab">Map</button>
       <button data-tab="system" class="tab">System</button>
     </nav>
+
+    <div class="panel hidden" data-panel="start">
+      <p class="lead">The robot is idle: motors, lidar and navigation are off. Choose what to do.</p>
+      <div class="card">
+        <h4>Operate on a map</h4>
+        <p class="muted small">Localize on a saved map, then run tours, edit waypoints and drive.</p>
+        <div id="start-maps" class="maplist"></div>
+        <button class="btn primary wide" id="start-operate" disabled>Start operating</button>
+      </div>
+      <div class="card">
+        <h4>Create a new map</h4>
+        <p class="muted small">Start SLAM and drive the robot around the space. Save from the Map tab before stopping.</p>
+        <button class="btn wide" id="start-mapping">Start mapping</button>
+      </div>
+      <p class="muted small">Starting a mode powers the motors, lidar and navigation. It takes 30–90 s. You need control first.</p>
+    </div>
 
     <div class="panel" data-panel="waypoints">
       <div class="row">
@@ -203,10 +224,6 @@
     </div>
 
     <div class="panel hidden" data-panel="system">
-      <div class="row">
-        <label class="grow">Map <select id="map-select"></select></label>
-        <button class="btn small" id="map-load">Load</button>
-      </div>
       <div class="kv" id="sys-kv"></div>
       <h3>Layers</h3>
       <div class="row wrap" id="layers">
@@ -223,13 +240,21 @@
 
 <div id="toasts" class="toasts"></div>
 
+<dialog id="mode-dlg">
+  <form method="dialog">
+    <h3>Robot mode</h3>
+    <div id="mode-dlg-body"></div>
+    <div class="row end"><button value="cancel" class="btn">Close</button></div>
+  </form>
+</dialog>
+
 <dialog id="dlg">
   <form method="dialog">
     <h3 id="dlg-title"></h3>
     <p id="dlg-text"></p>
     <input id="dlg-input" type="text" class="hidden">
     <div class="row end">
-      <button value="cancel" class="btn">Cancel</button>
+      <button value="cancel" class="btn" id="dlg-cancel">Cancel</button>
       <button value="ok" class="btn primary" id="dlg-ok">OK</button>
     </div>
   </form>

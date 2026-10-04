@@ -22,6 +22,12 @@ builds and contain the currently runnable workspace.
 
 ## Canonical launches
 
+Robot app with the browser console (primary; see "Sahabat Robot app" below):
+
+```bash
+ros2 launch shbat_pkg robot.launch.py
+```
+
 Remote Foxglove operation (safe idle, E-stop active at startup):
 
 ```bash
@@ -203,50 +209,68 @@ remembers the selected voice and reapplies it when the app reconnects. Mason is
 the default voice. The default cache limit is 512 MB and can be changed with
 `TTS_CACHE_MAX_MB`.
 
-### Browser operator console
+### Sahabat Robot app (browser console)
 
-**Sahabat Waypoint Editor Live** also starts `web_console`, a browser version of
-the RViz waypoint editor. Open `http://<robot-ip>:8088/` from any device on the
-robot's network. Nothing needs to be installed on the client.
+The **Sahabat Robot** desktop shortcut is the primary way to run the robot:
 
-- Map view: map, robot pose, filtered lidar, global plan, waypoints, routes,
-  dock, and saved AprilTags. Tools: pose estimate, Nav goal, and add/drag/rotate
-  waypoints.
-- Tabs: waypoint sets/editing/patrol/dock, joystick or WASD teleop, AprilTag
-  capture and tag/global relocalization, and map loading.
+```bash
+ros2 launch shbat_pkg robot.launch.py            # boots to Idle
+ros2 launch shbat_pkg robot.launch.py start_mode:=operations map_id:=gallerysq4
+```
+
+It starts only the persistent operator layer: `operator_backend`,
+`operator_mode_manager` (`stack:=full`) and `web_console`. Open
+`http://<robot-ip>:8088/` from any device on the robot network (the launcher
+terminal prints the address). Over the router it is `http://192.168.10.135:8088/`.
+
+**Modes** (the pill at the top left shows the mode; tap it to switch):
+
+| Mode | What runs | Tabs |
+|---|---|---|
+| Idle | Nothing; motors, lidar and navigation off | Start, System |
+| Mapping | `navigation.launch.py mode:=mapping` (same as **Sahabat New Mapping**, no RViz) | Drive, Map, System |
+| Operating · `<map>` | `operations.launch.py` with the map, waypoint sets, ZED/AprilTags and loopback API (same as **Sahabat Waypoint Editor Live**, no RViz) | Waypoints, Drive, Localize, System |
+
+Switching requires control and a stationary robot. It cancels any navigation
+goal, stops the current stack (SIGINT, escalating to SIGTERM/SIGKILL only if
+it hangs), and starts the next one. This takes 30–90 s and restarts the
+drivers. Leaving Mapping with unsaved changes asks for confirmation first.
+
+Shared behaviour:
+
 - **Take control** acquires the `/operator/control_lease` for that browser.
-  The lease is released 3 s after the browser stops sending heartbeats, and the
-  backend stops teleop 0.25 s after the last drive command. While the browser
-  holds the lease, RViz panel actions that need a lease are refused.
+  The lease is released 3 s after the browser stops sending heartbeats. A slow
+  renewal does not drop it; only the backend can. The backend stops teleop
+  0.25 s after the last drive command. While a browser holds the lease, RViz
+  panel actions that need a lease are refused.
 - The header E-STOP (or the space bar) latches `/emergency_stop` without needing
   control. Clearing it requires control and a confirmation.
+- Map view: map, robot pose, filtered lidar (full 3D lidar transform at the
+  scan stamp, like RViz), global plan, waypoints, routes, dock, saved
+  AprilTags. Pose estimate, Nav goal and waypoint tools exist only while
+  Operating. Saved-map overlays are hidden while Mapping.
+- **Map tab** (Mapping): saves `maps/<name>.yaml/.pgm` (written by the console
+  from `/map`, byte-identical to nav2 map_saver) and the editable session
+  `.posegraph/.data`. Every file is verified on disk before "Saved" is shown.
+  Reusing a name moves the old files to `maps/.archive/<name>-<timestamp>/`.
+  A banner shows when the live map has changes that are not saved.
 - Preferred routes are displayed and preserved on save but are still edited in
   RViz.
-- The dial at the top right of the map rotates only the view; saved map and pose
-  data are unchanged. Drag it to rotate freely, with soft detents every 15°
-  (hold Shift to disable them). Scroll on it for 1° steps (0.1° with Shift), and
-  click it to reset to 0°.
-- The Localize tab shows the ZED left image (`camera_topic`, default
-  `/zed/zed_node/left/image_rect_color`) as MJPEG with `/apriltag/detections`
-  outlines. The overlay shows the tag ID, decision margin, and camera fps. The
-  image is subscribed and encoded only while a browser is viewing it, at up to
-  `camera_fps` (15, matching the ZED grab rate) and `camera_width` 960. Each
-  encoded frame takes about 16 ms on the Jetson. Each browser can choose Smooth
-  (15 fps) or Data saver (5 fps) for slow links.
+- The dial at the top right of the map rotates only the view. Drag to rotate
+  freely, with soft detents every 15° (Shift disables them). Scroll for 1°
+  steps (0.1° with Shift), and click to reset.
+- Localize tab: ZED left image as MJPEG with frame-matched
+  `/apriltag/detections` outlines (tag ID, decision margin, camera fps). The
+  image is subscribed and encoded only while viewed, at up to `camera_fps` 15
+  and `camera_width` 960 (about 16 ms per frame on the Jetson). Each browser can
+  choose Smooth (15 fps) or Data saver (5 fps).
 
-Options: `ros2 run shbat_pkg live_waypoint_editor --no-rviz` runs the browser
-console only. `--no-web` disables it, and `--web-port N` changes the port.
-To start it on its own: `ros2 run shbat_pkg web_console --ros-args -p port:=8088`.
-
-**Mapping from the browser:** the **Sahabat New Mapping (Web Console)** shortcut
-(`ros2 run shbat_pkg web_mapping`) runs `navigation.launch.py mode:=mapping`
-plus `operator_backend` and `web_console`, without RViz or the Tk panel (add
-`--rviz` / `--panel` to get them). Drive with the Drive tab after taking
-control, then save from the **Map** tab. Files are written exactly like
-the mapping panel writes them (`maps/<name>.yaml/.pgm` and the editable session
-`.posegraph/.data`). Reusing a name first moves the old files to
-`maps/.archive/<name>-<timestamp>/`. The original **Sahabat New Mapping**
-shortcut is unchanged.
+Do not run **Sahabat Robot** together with the Live or New Mapping shortcuts:
+both start an operator backend and port 8088. The fixed-mode shortcuts remain
+engineering fallbacks with RViz. **Sahabat Waypoint Editor Live** also starts
+the console (`--no-web` to disable, `--no-rviz` for console only), and its
+backend reports Operating mode. Modes cannot be switched from the console
+there; the mode pill explains this.
 
 The console has **no authentication** and binds to all interfaces. Use it only
 on a trusted private network until access control (for example Tailscale plus a
