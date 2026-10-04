@@ -19,4 +19,4 @@ scan_filter:
     max_range: 8.0       # 8m - reduced from 12m, far readings are noisy
     
     # Filter zones: block rear 180° (-90° to 90°) to see front half only
-    filter_zones: [-90.0, 90.0]
+    filter_zones: [-85.0, 85.0]  # rear mask: robot-frame left edge 95.0°, right edge -95.0°, visible 190.0°
