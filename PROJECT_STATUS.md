@@ -1,6 +1,44 @@
 # Sahabat Robot - Project Status
 
-**Last Updated:** August 13, 2026
+**Last Updated:** October 5, 2026
+
+## Navigation and Drive Fixes (October 5, 2026)
+
+Goals behind the robot used to fail (DWB stalled, then the 20 s progress
+checker aborted), and later the robot overshot and flailed. Recorded bags
+traced this to three causes, all fixed and verified on the robot:
+
+- **Motor driver ramps:** the ZLAC8015D restarts its normal accel/decel ramp
+  on every new target, so with 200/500 ms ramps it lagged Nav2's continuously
+  changing commands by 0.5–2.5 s. Normal ramps are now **50 ms**; the Nav2
+  velocity smoother and teleop rate limiters shape the motion. The E-stop
+  quick stop stays at 10 ms. This was the main fix.
+- **Heading source:** wheel odometry over-counts in-place turns by ~7.5%, and
+  the EKF followed wheel yaw exactly. The EKF now takes heading from the
+  HWT901B gyro (within 0.4% in lidar-checked spins) and distance from the
+  wheels.
+- **Turning toward a path behind the robot:** `FollowPath` is now
+  `RotationShimController` wrapping the existing DWB. It pivots at 0.5 rad/s
+  when a new path starts more than 0.6 rad off the heading, then hands over.
+
+Also changed today:
+
+- Velocity smoother builds speed at 0.45 m/s² / 1.2 rad/s², brakes promptly,
+  and limits axes independently. DWB cruises at up to 0.5 m/s (the smoother
+  and `base_controller` caps).
+- Rear lidar mask widened from 180° to 190° visible, measured with the new
+  `scan_mask_tuner`.
+- E-stop now quick-stops, then after 0.5 s disables the motors so the robot
+  can be pushed by hand (`disable_motors_on_estop:=false` keeps them held).
+- Web-console and Foxglove teleop ramp up and down (0.6 m/s², 1.2 rad/s²)
+  instead of jumping; the physical joystick keeps control until its ramp-down
+  reaches zero.
+- AMCL needed no change: after these fixes it moves the heading only
+  0.5–1.6° per 110–215° pivot.
+- `scripts/record_nav_test.sh <label>` records supervised test bags into
+  `~/sahabat_ws/bags/`.
+
+Details, measurements and rollback notes are in `OPERATIONAL_RUNBOOK.md`.
 
 ## Current Implementation Notes (June 29, 2026)
 
@@ -70,6 +108,7 @@
 - **Xbox 360 Controller**: Requires `xpad` kernel module (compiled from source for Jetson kernel). Wireless adapter supported.
 - Udev rules at `udev/99-sahabat-robot.rules` (must be installed to `/etc/udev/rules.d/`).
 - **Angular velocity limited to 0.5 rad/s** to prevent scan mismatch during rotation (10Hz LIDAR sync).
+- **ZLAC8015D normal ramps are 50 ms** (set in `slam_nav_launch.py`); longer ramps restart on every command and make the drive lag Nav2 by seconds.
 
 ### Robot Physical Specs
 
@@ -95,10 +134,10 @@
 |-----------|--------------|--------|
 | Motor Driver | `shbat_pkg/base_controller` | ✅ Working |
 | LIDAR Driver | `rplidar_ros/rplidar_node` | ✅ Working (DenseBoost, 10 Hz) |
-| Scan Filter | `shbat_pkg/scan_filter` | ✅ Working (180° front-only FOV) |
+| Scan Filter | `shbat_pkg/scan_filter` | ✅ Working (190° front FOV) |
 | IMU Driver | `witmotion_ros2/witmotion_ros2` | ✅ Working (CH340 USB-dependent) |
-| EKF Fusion | `robot_localization/ekf_node` | ✅ Working |
-| Nav2 Stack | Full navigation stack | ✅ Working (odom-only mode) |
+| EKF Fusion | `robot_localization/ekf_node` | ✅ Working (gyro heading, wheel distance) |
+| Nav2 Stack | Full navigation stack | ✅ Working (rotation shim + DWB) |
 | SLAM Toolbox | 2D LIDAR SLAM (mapping) | ✅ Working |
 | AMCL | Localization with saved map | ✅ Working |
 | Joystick | `shbat_pkg/joy2cmd` | ✅ Working + Emergency Stop |
@@ -118,20 +157,25 @@
 
 ### 2. Joystick Control
 - Left stick: Forward/backward + rotation (Xbox 360 mapping)
-- **Emergency Stop:** Button A (stops robot immediately)
+- **Emergency Stop:** Button A (stops robot immediately; motors are released
+  0.5 s later so the robot can be pushed)
 - **Clear E-stop:** from the leased operator UI after confirming the area is safe
-- In remote-operator mode, releasing the remote UI deadman latches E-stop and
-  Button B cannot clear it; legacy launches retain their established mapping
+- Releasing the stick ramps the robot to a stop (0.6 m/s², 1.2 rad/s²); the
+  joystick keeps control until the ramp reaches zero
+- Web-console teleop ramps the same way when the on-screen stick is released;
+  in remote-operator mode Button B cannot clear the E-stop
 
 ### 3. Sensor Fusion (EKF)
-- Fuses wheel odometry + IMU
+- Heading from the IMU gyro rate; forward motion from wheel odometry
+  (wheel yaw over-counts pivots by ~7.5% and is only a low-weight fallback)
 - Publishes `/odom` topic and `odom → base_link` TF
 - Config: `config/ekf.yaml`
 
 ### 4. LIDAR Filtering
 - Input: `/scan_raw` → Output: `/scan`
 - RPLIDAR S2 mounted upside-down + backward: TF `rpy="3.14 0 3.14"` corrects orientation
-- 180° front-only FOV: filters rear half `[-90°, 90°]` where robot body/beams are
+- 190° front FOV: filters the rear `[-85°, 85°]` (lidar frame) where the robot body is
+- Tune the mask visually with `ros2 run shbat_pkg scan_mask_tuner` while the lidar check runs
 - Config: `config/scan_filter.yaml`
 
 ### 5. Smart Device Detection
@@ -213,9 +257,9 @@
 
 | File | Purpose |
 |------|---------|
-| `config/nav2_odom_only.yaml` | Nav2 parameters (planner, controller, rolling costmaps) |
+| `config/nav2_odom_only.yaml` | Nav2 parameters (planner, rotation shim + DWB controller, velocity smoother, rolling costmaps) |
 | `config/ekf.yaml` | EKF sensor fusion settings |
-| `config/scan_filter.yaml` | LIDAR angle filtering (180° front-only FOV) |
+| `config/scan_filter.yaml` | LIDAR angle filtering (190° front FOV) |
 | `config/slam_toolbox.yaml` | SLAM mapping parameters |
 | `config/amcl.yaml` | AMCL localization parameters |
 | `config/patrol_waypoints.yaml` | Waypoint patrol locations |
@@ -297,6 +341,12 @@ ros2 run shbat_pkg save_current_pose
 ros2 topic pub /emergency_stop std_msgs/msg/Bool "{data: true}" --once
 ros2 topic pub /emergency_stop std_msgs/msg/Bool "{data: false}" --once
 
+# === RECORD A SUPERVISED NAVIGATION TEST ===
+~/sahabat_ws/src/shbat_pkg/scripts/record_nav_test.sh behind_goals
+
+# === TUNE THE REAR LIDAR MASK (lidar check running, no motors) ===
+ros2 run shbat_pkg scan_mask_tuner
+
 # === DIAGNOSTICS ===
 ros2 topic echo /odom --once
 ros2 topic echo /imu --once
@@ -329,6 +379,8 @@ ls /dev/input/js*
 - [ ] Initialize KG110F remaining capacity after a confirmed full charge and verify its temperature input
 - [x] ~~AprilTag landmark recording and guarded AMCL startup localization~~
 - [ ] Verify AprilTag pose accuracy and ZED camera extrinsics on the physical robot
+- [x] ~~Navigate to goals behind the robot without stalling or overshooting~~
+- [ ] Confirm on the robot: E-stop motor release, physical-joystick ramp-down, and 0.5 m/s cruise
 
 ---
 
@@ -344,7 +396,11 @@ ls /dev/input/js*
 
 ### Scan Mismatch During Rotation
 **Symptom:** LIDAR scan doesn't match walls when robot rotates
-**Solution:** Angular velocity limited to 0.5 rad/s (~28°/s).
+**Solution:** Angular velocity limited to 0.5 rad/s (~28°/s). Odometry heading now comes from the gyro, so AMCL no longer has to correct a turn error after each pivot.
+
+### Robot Overshoots or Keeps Driving Old Commands
+**Symptom:** Navigation overshoots pivots, swings back and forth, or keeps moving for a second or more after the command changes
+**Solution:** Keep the ZLAC normal accel/decel ramps short (50 ms in `slam_nav_launch.py`). Long ramps restart on every new command and lag Nav2. Check with a bag from `record_nav_test.sh`: commands on `/cmd_vel` should show up on `/wheel_odom` within a few hundred ms.
 
 ### Map Orientation Wrong on Boot
 **Symptom:** Map appears rotated 90° from laser scan on startup
