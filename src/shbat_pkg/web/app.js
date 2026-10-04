@@ -93,7 +93,8 @@ function connect() {
     const img = new Image();
     img.onload = () => {
       const first = !S.mapImg;
-      S.map = d; S.mapImg = img; S.mapBounds = knownBounds(img, d);
+      S.map = d; S.mapImg = img; S.mapDark = null; S.mapBounds = knownBounds(img, d);
+      darkVersion(img).then((dark) => { if (S.mapImg === img) { S.mapDark = dark; draw(); } });
       if (first) fitMap();
       draw();
       renderMapping();
@@ -228,6 +229,35 @@ function knownBounds(img, m) {
   };
 }
 
+// Dark-theme copy of the map, computed once per map update. Filtering the
+// image on every redraw (ctx.filter) cost ~12 ms per frame on the Jetson,
+// and drawing from a canvas source was as slow, so it is turned back into
+// an <img> (0.7-4 ms per draw).
+function darkVersion(img) {
+  const c = document.createElement('canvas');
+  c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0);
+  const data = g.getImageData(0, 0, c.width, c.height);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) {
+    if (!px[i + 3]) continue;
+    // Equivalent of invert(0.9) on the grey map palette.
+    px[i] = 229.5 - 0.8 * px[i];
+    px[i + 1] = 229.5 - 0.8 * px[i + 1];
+    px[i + 2] = 229.5 - 0.8 * px[i + 2];
+  }
+  g.putImageData(data, 0, 0);
+  return new Promise((resolve) => {
+    c.toBlob((blob) => {
+      const out = new Image();
+      const url = URL.createObjectURL(blob);
+      out.onload = () => { URL.revokeObjectURL(url); resolve(out); };
+      out.src = url;
+    }, 'image/png');
+  });
+}
+
 function fitMap() {
   const b = S.mapBounds;
   if (!b || !W() || !H()) return;
@@ -253,7 +283,9 @@ function zoomAt(factor, sx = W() / 2, sy = H() / 2) {
 }
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-const darkTheme = () => matchMedia('(prefers-color-scheme: dark)').matches;
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const darkTheme = () => darkQuery.matches;
+darkQuery.addEventListener('change', () => draw());
 
 let drawQueued = false;
 function draw() {
@@ -300,8 +332,8 @@ function render() {
     ctx.translate(sx, sy);
     ctx.rotate(-view.rot);
     ctx.imageSmoothingEnabled = view.scale * m.resolution < 2;
-    if (darkTheme()) ctx.filter = 'invert(0.9) hue-rotate(180deg)';
-    ctx.drawImage(S.mapImg, 0, 0, m.width * m.resolution * view.scale, m.height * m.resolution * view.scale);
+    const source = darkTheme() && S.mapDark ? S.mapDark : S.mapImg;
+    ctx.drawImage(source, 0, 0, m.width * m.resolution * view.scale, m.height * m.resolution * view.scale);
     ctx.restore();
   }
 
