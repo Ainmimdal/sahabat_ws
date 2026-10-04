@@ -480,6 +480,23 @@ walls after each pivot. Stop if the robot pivots repeatedly back and forth or
 hesitates between pivoting and driving. Bags are written to
 `~/sahabat_ws/bags/`, which git ignores.
 
+Odometry heading comes from the HWT901B gyro, not the wheels. Spin-calibration
+bags on 2026-10-05 (lidar scan match as truth) showed wheel odometry
+over-counts in-place rotation by about 7.5% (386–396° per real 360°), and the
+EKF followed wheel yaw exactly because it was the only absolute heading input.
+The robot therefore over-turned every pivot and AMCL had to drag the pose back
+while driving. `config/ekf.yaml` now fuses only wheel `vx`, gyro `vyaw`, and
+wheel `vyaw` as a low-weight fallback; the launch files give the gyro a
+(0.01 rad/s)² variance so it outweighs the wheels about 100:1. Replaying the
+calibration bags through the new EKF cut the error from 26–29° to 0.1–1.5° per
+turn with no measurable drift at rest.
+
+To re-check heading after any IMU, wheel or EKF change, record a spin
+calibration: with a tape mark under the robot's front edge and walls in lidar
+view, run `record_nav_test.sh spin_calibration`, turn exactly one full turn in
+place by joystick, stop for 5 s, then turn back. Compare `/odom` yaw change
+with 360°; it should agree within about 2°.
+
 After changing Nav2 speed or controller tuning, use a clear straight test lane
 with a person beside the emergency stop. Start with a short goal at 0.2 m/s,
 then repeat at 0.3 m/s before testing the 0.42 m/s candidate or allowing the

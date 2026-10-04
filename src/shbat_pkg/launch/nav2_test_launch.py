@@ -236,6 +236,12 @@ def generate_launch_description():
             'update_rate': 50.0,
             'frame_id': 'imu_link',
             'topic_name': '/witmotion',
+            # Gyro variance for the EKF; see slam_nav_launch.py.
+            'imu_angular_velocity_covariance': [
+                1e-4, 0.0, 0.0,
+                0.0, 1e-4, 0.0,
+                0.0, 0.0, 1e-4,
+            ],
         }],
         remappings=[('/witmotion/imu', '/imu')],
         condition=IfCondition(use_imu)

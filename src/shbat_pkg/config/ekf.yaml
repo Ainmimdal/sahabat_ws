@@ -37,44 +37,44 @@ ekf_filter_node:
     world_frame: odom
 
     # -------------------------------------------------------------------
-    # Sensor 0: Wheel Odometry (position + velocity)
-    # Topic: /wheel_odom (from base_controller.py)
-    # 
-    # For differential drive:
-    # - Use x, y position (wheels track distance)
-    # - Use yaw from wheels as backup
-    # - Use vx linear velocity
-    # - Use vyaw angular velocity
+    # Heading comes from the IMU gyro, distance from the wheels.
+    #
+    # Spin-calibration bags (2026-10-05, lidar scan match as truth) showed
+    # wheel odometry over-counts in-place rotation by ~7.5% (386-396 deg per
+    # real 360) from wheel scrub, while the HWT901B gyro was within 0.4% and
+    # drifted < 0.5 deg/min at rest. Absolute wheel yaw was the only absolute
+    # heading input, so the EKF followed wheel heading exactly and the robot
+    # misjudged every pivot. Fuse only velocities: the EKF then integrates
+    # the gyro for heading; AMCL corrects slow drift through map -> odom.
     # -------------------------------------------------------------------
+    # Sensor 0: Wheel Odometry (/wheel_odom from base_controller.py)
+    # - vx: wheel distance is the only forward-motion source
+    # - vyaw: fallback when no IMU is detected; its 0.01 variance is 100x the
+    #   gyro's, so with the IMU present it contributes ~1% (~0.1% bias)
     odom0: /wheel_odom
-    odom0_config: [true,  true,  false,   # x, y position (no z)
-                   false, false, true,    # yaw orientation from wheels
+    odom0_config: [false, false, false,   # no absolute x, y, z
+                   false, false, false,   # no absolute roll, pitch, yaw
                    true,  false, false,   # vx velocity only
-                   false, false, true,    # vyaw angular velocity
+                   false, false, true,    # vyaw (low-weight fallback)
                    false, false, false]   # no acceleration
     odom0_queue_size: 10
     odom0_nodelay: true
     odom0_differential: false
     odom0_relative: false
-    odom0_pose_rejection_threshold: 5.0
     odom0_twist_rejection_threshold: 1.0
 
-    # -------------------------------------------------------------------
-    # Sensor 1: IMU (orientation + angular velocity)
-    # Topic: /imu (HWT901B WITMotion)
-    #
-    # IMU provides:
-    # - Yaw angular velocity (gyroscope) - most reliable from IMU
-    # - Use differential mode for orientation to avoid drift issues
-    # -------------------------------------------------------------------
+    # Sensor 1: IMU (/imu, HWT901B WITMotion)
+    # - vyaw only (gyro). Orientation yaw is not fused: it jittered by up to
+    #   3 deg while stationary in the calibration bags.
+    # - The driver's angular velocity covariance is set in slam_nav_launch.py.
     imu0: /imu
     imu0_config: [false, false, false,   # no position from IMU
-                  false, false, true,    # yaw orientation
+                  false, false, false,   # no orientation
                   false, false, false,   # no linear velocity
                   false, false, true,    # yaw angular velocity (gyro)
                   false, false, false]   # no acceleration
     imu0_nodelay: true
-    imu0_differential: true              # USE DIFFERENTIAL - integrates angular velocity
+    imu0_differential: false
     imu0_relative: false
     imu0_queue_size: 10
     imu0_remove_gravitational_acceleration: true

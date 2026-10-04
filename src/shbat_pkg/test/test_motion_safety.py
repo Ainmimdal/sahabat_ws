@@ -266,6 +266,26 @@ def test_imu_frame_is_fixed_to_base_link_for_ekf_fusion():
     assert ekf_parameters['imu0'] == '/imu'
 
 
+def test_ekf_takes_heading_from_gyro_not_wheel_yaw():
+    package_root = Path(__file__).resolve().parents[1]
+    ekf = yaml.safe_load(
+        (package_root / 'config' / 'ekf.yaml').read_text()
+    )['ekf_filter_node']['ros__parameters']
+    # Index layout: x y z, roll pitch yaw, vx vy vz, vroll vpitch vyaw, ax ay az
+    wheel, imu = ekf['odom0_config'], ekf['imu0_config']
+    # Wheels over-count pivots by ~7.5%; no absolute wheel pose may be fused.
+    assert wheel[:6] == [False] * 6
+    assert wheel[6] is True
+    # The gyro rate is the heading source; IMU orientation is not fused.
+    assert imu[11] is True
+    assert imu[:6] == [False] * 6
+    # Without published covariance the gyro cannot outweigh wheel vyaw.
+    for launch_file in ('slam_nav_launch.py', 'sahabat_launch.py',
+                        'nav2_test_launch.py'):
+        text = (package_root / 'launch' / launch_file).read_text()
+        assert "'imu_angular_velocity_covariance'" in text, launch_file
+
+
 def test_goal_pose_recovery_is_bounded_and_stationary():
     package_root = Path(__file__).resolve().parents[1]
     configuration = yaml.safe_load(

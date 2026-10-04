@@ -456,6 +456,14 @@ def generate_launch_description():
             'update_rate': 50.0,
             'frame_id': 'imu_link',
             'topic_name': '/witmotion',
+            # The driver otherwise publishes all-zero covariances. The EKF
+            # fuses only gyro z; (0.01 rad/s)^2 matches the 2026-10-05 spin
+            # calibration and makes it outweigh wheel vyaw (0.01) ~100:1.
+            'imu_angular_velocity_covariance': [
+                1e-4, 0.0, 0.0,
+                0.0, 1e-4, 0.0,
+                0.0, 0.0, 1e-4,
+            ],
         }],
         remappings=[('/witmotion/imu', '/imu')],
         condition=hardware_and(use_imu)
