@@ -96,10 +96,32 @@ controller_server:
       yaw_goal_tolerance: 0.12     # ~7 degrees avoids final-heading hunting
 
     FollowPath:
-      # DWB scores complete velocity trajectories instead of following RPP's
-      # moving lookahead point. The RotateToGoal critic explicitly slows linear
-      # motion, stops, then minimizes predicted final-yaw error.
-      plugin: "dwb_core::DWBLocalPlanner"
+      # The rotation shim pivots in place whenever a new path starts more than
+      # angular_dist_threshold away from the robot's heading, then hands the
+      # path to DWB. DWB alone stalled on side/behind goals: with 0.5 rad/s and
+      # a 1.2 s horizon, in-place rotation barely changed its critic scores, so
+      # it hovered near stiction until the 20 s progress checker aborted.
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "dwb_core::DWBLocalPlanner"
+      angular_dist_threshold: 0.6      # ~34 deg; smaller errors stay DWB arcs
+      # This Humble build has no braking profile: the shim turns at full rate
+      # until it disengages, then the ZLAC 500 ms decel ramp coasts the robot
+      # ~0.12 rad at 0.5 rad/s. Disengaging at that angle lets it coast into
+      # alignment. The 2026-10-05 bag at 0.25 rad handed DWB 10-14 deg of
+      # error while still turning, and DWB then weaved +/-20 deg.
+      angular_disengage_threshold: 0.12  # ~7 deg, matches the coast angle
+      forward_sampling_distance: 0.5   # Aim at the path 0.5 m ahead
+      rotate_to_heading_angular_vel: 0.5  # The validated lidar-safe cap
+      # Only shapes the start of a pivot here (no braking in this build).
+      max_angular_accel: 3.0           # Same stiction-breaking ramp as DWB
+      # Ramp from the last command, not measured speed; measured speed stays
+      # ~0 below drivetrain stiction and would hold the command there.
+      closed_loop: false
+      simulate_ahead_time: 1.0         # Collision-check the pivot
+      rotate_to_goal_heading: false    # DWB RotateToGoal keeps final heading
+      # DWB parameters below are read by the primary controller in this same
+      # FollowPath namespace. DWB scores complete velocity trajectories; its
+      # RotateToGoal critic slows, stops, then minimizes final-yaw error.
       debug_trajectory_details: false
       min_vel_x: 0.0
       min_vel_y: 0.0

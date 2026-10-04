@@ -173,7 +173,7 @@ def test_route_behavior_uses_restored_follow_path_controller():
     assert follow_path.attrib['controller_id'] == 'FollowPath'
 
 
-def test_nav2_uses_dwb_with_lidar_safe_motion_limits():
+def test_nav2_uses_rotation_shim_over_dwb_with_lidar_safe_motion_limits():
     package_root = Path(__file__).resolve().parents[1]
     configuration = yaml.safe_load(
         (package_root / 'config' / 'nav2_odom_only.yaml').read_text()
@@ -186,7 +186,17 @@ def test_nav2_uses_dwb_with_lidar_safe_motion_limits():
     progress_checker = controller_parameters['progress_checker']
     assert progress_checker['plugin'] == 'nav2_controller::PoseProgressChecker'
     assert progress_checker['required_movement_angle'] == 0.20
-    assert controller['plugin'] == 'dwb_core::DWBLocalPlanner'
+    assert controller['plugin'] == (
+        'nav2_rotation_shim_controller::RotationShimController'
+    )
+    assert controller['primary_controller'] == 'dwb_core::DWBLocalPlanner'
+    # Pivots must stay within the lidar-safe angular limit and ramp open loop.
+    assert controller['rotate_to_heading_angular_vel'] <= controller['max_vel_theta']
+    assert controller['closed_loop'] is False
+    assert (
+        controller['angular_disengage_threshold']
+        < controller['angular_dist_threshold']
+    )
     assert controller['max_vel_x'] == 0.4
     assert controller['max_vel_y'] == 0.0
     assert controller['max_vel_theta'] == 0.5

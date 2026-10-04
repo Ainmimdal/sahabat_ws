@@ -448,6 +448,38 @@ points remain continuous via targets; final waypoint orientation is still
 enforced. These values are not yet a physical baseline. The command arbiter
 must be the sole normal `/cmd_vel` publisher during this test.
 
+The controller is now DWB (`dwb_core::DWBLocalPlanner`) wrapped by Nav2's
+`RotationShimController`; the RPP values above are history. DWB alone often
+stalled on goals beside or behind the robot and aborted with `Failed to make
+progress` after 20 s. Whenever a new path starts more than 0.6 rad (~34°) off
+the robot's heading, the shim now pivots in place at 0.5 rad/s until the error
+is under 0.12 rad (~7°), then DWB follows the path with its unchanged
+parameters. This Humble shim has no braking profile, so the 0.12 rad hand-over
+is chosen to match the ~7° the motors coast during their 500 ms stop ramp.
+Replanning issues a new path, so a sharp bend at replan time may also cause a
+short pivot. Roll back by restoring the `FollowPath` plugin line to
+`dwb_core::DWBLocalPlanner` and removing the shim keys.
+
+Rotation shim test (person beside the emergency stop, robot localized, open
+floor first and then about 0.5 m from a wall). Record each session for review:
+
+```bash
+~/sahabat_ws/src/shbat_pkg/scripts/record_nav_test.sh rotation_shim
+```
+
+1. Goal 2 m straight ahead: DWB drives it with no pivot.
+2. Goals at 90°, 135° and 180° (directly behind), 1.5–2 m away: the robot
+   pivots without creeping forward, stops the pivot near the path heading, then
+   drives smoothly.
+3. A goal behind the robot whose final heading also differs: the final heading
+   is still reached within ~7°.
+
+Pass when no goal aborts with `Failed to make progress` or `No valid
+trajectories`, pivots never exceed 0.5 rad/s, and the scan lines up with the
+walls after each pivot. Stop if the robot pivots repeatedly back and forth or
+hesitates between pivoting and driving. Bags are written to
+`~/sahabat_ws/bags/`, which git ignores.
+
 After changing Nav2 speed or controller tuning, use a clear straight test lane
 with a person beside the emergency stop. Start with a short goal at 0.2 m/s,
 then repeat at 0.3 m/s before testing the 0.42 m/s candidate or allowing the
