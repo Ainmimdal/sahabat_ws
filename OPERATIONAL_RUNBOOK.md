@@ -505,7 +505,7 @@ needed 0.7–0.9 s to follow a speed-up and 1.0–1.4 s (worst over 4 s) to slow
 down or reverse, measured from `/cmd_vel` (after Nav2) to `/wheel_odom`. At a
 pivot-to-drive hand-over the reversing wheel lagged while the other sped up, so
 the robot spun the wrong way at up to 0.9 rad/s and DWB over-corrected. The
-velocity smoother therefore builds speed gently (0.3 m/s², 0.8 rad/s²), still
+velocity smoother therefore builds speed gently (now 0.45 m/s², 1.2 rad/s²), still
 brakes promptly (−0.35 m/s², −3.0 rad/s²), and limits each axis independently
 (`scale_velocities: False`) so pivot braking is not slowed by the linear ramp.
 DWB keeps `acc_lim_theta: 3.0` because its sampling window must reach the 0.15

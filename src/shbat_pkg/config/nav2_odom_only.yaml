@@ -134,7 +134,7 @@ controller_server:
       # interface, and 0.10 rad/s still becomes only 1 RPM. Use ~2 RPM so
       # side/behind-goal turns reliably overcome drivetrain stiction.
       min_speed_theta: 0.15
-      acc_lim_x: 0.3               # Matches the velocity smoother ramp
+      acc_lim_x: 0.45              # Matches the velocity smoother ramp
       acc_lim_y: 0.0
       # DWB's sampling window is acc_lim x one 20 Hz period around measured
       # speed, so 3.0 is needed to reach min_speed_theta (0.15) from rest.
@@ -338,11 +338,12 @@ velocity_smoother:
     # 0.7-0.9 s to follow a speed-up and 1.0-1.4 s (worst > 4 s) to slow down
     # or reverse. Abrupt pivot-to-drive commands made the reversing wheel lag
     # while the other sped up, spinning the robot the wrong way at ~0.9 rad/s.
-    # Build speed gently (June 20 baseline angular value) so the slow drive
-    # can follow. The smoother treats passing through zero as deceleration,
-    # so an old turn still stops promptly while the new one builds slowly
-    # (bench step: old turn stopped in ~0.15 s, new turn built over ~0.4 s).
-    max_accel: [0.3, 0.0, 0.8]
+    # Build speed gently. The smoother treats passing through zero as
+    # deceleration, so an old turn still stops promptly while the new one
+    # builds up (bench step at 0.8 rad/s^2: old turn stopped in ~0.15 s).
+    # Raised from 0.3/0.8 once 50 ms ZLAC ramps let the drive follow; in line
+    # with the joy2cmd limits (0.6 m/s^2, 1.2 rad/s^2).
+    max_accel: [0.45, 0.0, 1.2]
     # Request prompt braking; E-stop remains a separate 10 ms quick stop.
     max_decel: [-0.35, 0.0, -3.0]
     odom_topic: /odom
