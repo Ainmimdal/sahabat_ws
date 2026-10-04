@@ -32,6 +32,7 @@ setup(
             'launch/navigation.launch.py',
             'launch/operations.launch.py',
             'launch/remote_operations.launch.py',
+            'launch/robot.launch.py',
             'launch/waypoint_editor.launch.py',
         ]),
         ('share/' + package_name + '/launch/debug', [
@@ -123,7 +124,6 @@ setup(
             'junctek_battery = shbat_pkg.junctek_battery:main',
             'junctek_monitor = shbat_pkg.junctek_monitor:main',
             'web_console = shbat_pkg.web_console:main',
-            'web_mapping = shbat_pkg.web_mapping:main',
         ],
     },
 )
