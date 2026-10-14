@@ -796,6 +796,18 @@ Use `initialize_from_dock:=false` when intentionally starting elsewhere; set
 the node parameter `refine_with_scan:=false` only to restore the old blind
 dock-pose behaviour.
 
-The ZED grabs at HD720 (depth disabled) for longer tag range. Revert
-`general.grab_resolution` to `VGA` in `slam_nav_launch.py` if CPU load on the
-Orin is a problem.
+In the Sahabat Robot app the camera is **off by default**: the dock + lidar
+match does not need it. Tick "Use the ZED camera" in the Start-operating
+dialog (or launch `robot.launch.py use_zed:=true`) to add AprilTag
+localization. The desktop Live shortcut still starts the camera.
+
+The ZED runs at VGA, 10 fps, depth disabled, and apriltag reads the grey
+image (`left_gray/image_rect_gray`). Bench on 2026-10-05 (camera only, no
+tags in view, % of one core): HD720 colour delivered only 0-3 fps to
+apriltag because ~3.7 MB frames were dropped between processes (CycloneDDS,
+no shared memory); VGA grey at 10 fps costs ZED 17 % + apriltag 16 %. Tag
+startup is limited to tags within 3 m because VGA shortens tag range;
+`detector.decimate: 1.0` restores range but costs ~58 % of a core.
+The scan matcher projects the scan with the full lidar rotation (the lidar is
+upside down); before 2026-10-05 it mirrored the scan, which made dock and
+tag startup unreliable.

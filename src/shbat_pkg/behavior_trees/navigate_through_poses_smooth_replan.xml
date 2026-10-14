@@ -1,7 +1,11 @@
 <!--
   Follow operator-approved route points as one continuous path. Replan through
   the remaining poses when the path changes, becomes invalid, or reaches five
-  seconds old, then smooth the new collision-checked path once.
+  seconds old, then smooth the new collision-checked path once. If the
+  smoothed path would collide, keep following the planner's raw path rather
+  than aborting the goal: SmoothPath only writes {path} on success.
+  A via point counts as passed within 0.7 m, so a point beside a wall end
+  does not hold the robot on a tight turn; the final goal is never removed.
 -->
 <root main_tree_to_execute="MainTree">
   <BehaviorTree ID="MainTree">
@@ -13,7 +17,7 @@
               <RemovePassedGoals
                 input_goals="{goals}"
                 output_goals="{goals}"
-                radius="0.4"/>
+                radius="0.7"/>
               <Fallback name="FallbackComputeRoute">
                 <ReactiveSequence name="CheckIfNewRouteNeeded">
                   <Inverter>
@@ -27,14 +31,16 @@
                 <Sequence name="ComputeAndSmoothRoute">
                   <ComputePathThroughPoses
                     goals="{goals}"
-                    path="{raw_path}"
+                    path="{path}"
                     planner_id="GridBased"/>
-                  <SmoothPath
-                    unsmoothed_path="{raw_path}"
-                    smoothed_path="{path}"
-                    smoother_id="simple_smoother"
-                    max_smoothing_duration="0.5"
-                    check_for_collisions="true"/>
+                  <ForceSuccess>
+                    <SmoothPath
+                      unsmoothed_path="{path}"
+                      smoothed_path="{path}"
+                      smoother_id="simple_smoother"
+                      max_smoothing_duration="0.5"
+                      check_for_collisions="true"/>
+                  </ForceSuccess>
                 </Sequence>
               </Fallback>
             </ReactiveSequence>

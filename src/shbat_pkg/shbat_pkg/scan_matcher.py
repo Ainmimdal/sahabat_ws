@@ -159,8 +159,14 @@ def scan_to_points(
     sensor_yaw: float = 0.0,
     max_points: int = 240,
     usable_range: float = 8.0,
+    sensor_rotation: Optional[np.ndarray] = None,
 ) -> np.ndarray:
-    """Convert a LaserScan into (N,2) base-frame points, evenly subsampled."""
+    """Convert a LaserScan into (N,2) base-frame points, evenly subsampled.
+
+    ``sensor_rotation`` is the 2x2 planar part of the full sensor rotation
+    (see :func:`planar_rotation`). Pass it for rolled sensors such as the
+    upside-down lidar; ``sensor_yaw`` alone would mirror their scans.
+    """
     values = np.asarray(ranges, dtype=np.float64)
     angles = angle_min + angle_increment * np.arange(len(values))
     upper = min(float(range_max), float(usable_range))
@@ -173,12 +179,28 @@ def scan_to_points(
         angles = angles[keep]
     sx = values * np.cos(angles)
     sy = values * np.sin(angles)
-    cos = math.cos(sensor_yaw)
-    sin = math.sin(sensor_yaw)
+    if sensor_rotation is None:
+        cos = math.cos(sensor_yaw)
+        sin = math.sin(sensor_yaw)
+        sensor_rotation = np.array([[cos, -sin], [sin, cos]])
+    rotation = np.asarray(sensor_rotation, dtype=np.float64)
     return np.column_stack((
-        sensor_x + cos * sx - sin * sy,
-        sensor_y + sin * sx + cos * sy,
+        sensor_x + rotation[0, 0] * sx + rotation[0, 1] * sy,
+        sensor_y + rotation[1, 0] * sx + rotation[1, 1] * sy,
     ))
+
+
+def planar_rotation(qx: float, qy: float, qz: float, qw: float) -> np.ndarray:
+    """Return the x/y block of a quaternion's rotation matrix.
+
+    Projects sensor-plane points into the base plane with the full rotation,
+    so a lidar rolled 180 degrees is handled like RViz does instead of being
+    mirrored by a yaw-only projection.
+    """
+    return np.array([
+        [1.0 - 2.0 * (qy * qy + qz * qz), 2.0 * (qx * qy - qz * qw)],
+        [2.0 * (qx * qy + qz * qw), 1.0 - 2.0 * (qx * qx + qz * qz)],
+    ])
 
 
 def _pose_grid(

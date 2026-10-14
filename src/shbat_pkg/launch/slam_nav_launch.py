@@ -518,11 +518,14 @@ def generate_launch_description():
             {
                 'general.camera_name': 'zed2i',
                 'general.camera_model': 'zed2i',
-                # HD720 roughly doubles AprilTag detection range and pose
-                # accuracy versus VGA; depth stays disabled so GPU load is low.
-                'general.grab_resolution': 'HD720',
+                # VGA keeps the camera light on the saturated Jetson. HD720
+                # colour frames (~3.7 MB) were mostly dropped between
+                # processes (0-3 fps reached apriltag); VGA grey at 10 fps
+                # costs ~33% of one core for ZED + apriltag together
+                # (2026-10-05 bench). Tag range is shorter than at HD720.
+                'general.grab_resolution': 'VGA',
                 'general.grab_frame_rate': 15,
-                'general.pub_frame_rate': 15.0,
+                'general.pub_frame_rate': 10.0,
                 # AprilTag needs only the rectified left image and camera info.
                 # NONE prevents depth and point-cloud generation.
                 'depth.depth_mode': 'NONE',
@@ -733,7 +736,9 @@ def generate_launch_description():
         output='screen',
         parameters=[apriltag_config],
         remappings=[
-            ('image_rect', '/zed/zed_node/left/image_rect_color'),
+            # Grey image: apriltag detects on mono8 anyway, and it is a
+            # quarter of the BGRA colour image to copy between processes.
+            ('image_rect', '/zed/zed_node/left_gray/image_rect_gray'),
             ('camera_info', '/zed/zed_node/left/camera_info'),
             ('detections', '/apriltag/detections'),
         ],

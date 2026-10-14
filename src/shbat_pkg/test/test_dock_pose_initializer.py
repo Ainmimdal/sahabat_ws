@@ -22,3 +22,22 @@ def test_dock_file_is_read_per_map(tmp_path):
     path.write_text('dock: {x: bad}\n', encoding='utf-8')
     assert DockPoseInitializer.read_dock_file(path) is None
     assert DockPoseInitializer.read_dock_file(tmp_path / 'missing.yaml') is None
+
+
+def test_status_can_switch_between_warn_and_info():
+    """rclpy rejects a call site that changes severity; set_status must not."""
+    import rclpy
+
+    rclpy.init()
+    try:
+        node = DockPoseInitializer()
+        try:
+            node.set_status('rejected', 'warn')
+            node.set_status('initialized')
+            node.set_status('rejected again', 'warn')
+            node.set_status('failed', 'error')
+            node.set_status('localized')
+        finally:
+            node.destroy_node()
+    finally:
+        rclpy.shutdown()

@@ -1,0 +1,7 @@
+version: 1
+dock:
+  id: dock
+  name: dock
+  x: 5.995
+  y: 19.598
+  yaw: -0.421

@@ -12,6 +12,12 @@ The robot boots into Idle (no drivers running) unless start_mode is given:
   ros2 launch shbat_pkg robot.launch.py
   ros2 launch shbat_pkg robot.launch.py start_mode:=operations map_id:=gallerysq4
   ros2 launch shbat_pkg robot.launch.py start_mode:=mapping
+  ros2 launch shbat_pkg robot.launch.py start_mode:=operations \
+      map_id:=gallerysq4 use_zed:=true
+
+use_zed sets whether Operating starts the ZED camera for AprilTag
+localization (default off: the lidar dock match does not need it). The web
+console asks again each time Operating is started from it.
 
 The web console has no authentication; keep it on a trusted network.
 """
@@ -22,6 +28,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -39,6 +46,11 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'map_id', default_value='',
             description='Map for start_mode:=operations (file stem in maps/)',
+        ),
+        DeclareLaunchArgument(
+            'use_zed', default_value='false', choices=['true', 'false'],
+            description='Default for starting the ZED/AprilTag camera in '
+                        'Operating mode',
         ),
         DeclareLaunchArgument('web_port', default_value='8088'),
     ]
@@ -60,6 +72,8 @@ def generate_launch_description():
             'stack': 'full',
             'initial_mode': LaunchConfiguration('start_mode'),
             'initial_map': LaunchConfiguration('map_id'),
+            'use_zed': ParameterValue(
+                LaunchConfiguration('use_zed'), value_type=bool),
         }],
     )
     web_console = Node(

@@ -323,6 +323,33 @@ def test_goal_pose_recovery_is_bounded_and_stationary():
     assert follow_path.attrib['controller_id'] == 'FollowPath'
 
 
+
+def test_failed_path_smoothing_falls_back_to_the_raw_path():
+    # SmoothPath writes {path} only on success, so a smoothed path that would
+    # collide must leave the planner's raw path in place, not abort the goal.
+    behavior_trees = Path(__file__).resolve().parents[1] / 'behavior_trees'
+    for name in (
+        'navigate_to_pose_replan_if_path_invalid.xml',
+        'navigate_through_poses_smooth_replan.xml',
+    ):
+        root = ET.parse(behavior_trees / name).getroot()
+        smooth_path = root.find('.//ForceSuccess/SmoothPath')
+        assert smooth_path is not None, name
+        assert smooth_path.attrib['unsmoothed_path'] == '{path}'
+        assert smooth_path.attrib['smoothed_path'] == '{path}'
+        assert smooth_path.attrib['check_for_collisions'] == 'true'
+        planner = root.find('.//ComputePathToPose')
+        if planner is None:
+            planner = root.find('.//ComputePathThroughPoses')
+        assert planner.attrib['path'] == '{path}'
+        assert root.find('.//FollowPath').attrib['path'] == '{path}'
+
+    through_poses = ET.parse(
+        behavior_trees / 'navigate_through_poses_smooth_replan.xml'
+    ).getroot()
+    assert through_poses.find('.//RemovePassedGoals').attrib['radius'] == '0.7'
+
+
 class _EstopDriver:
     def __init__(self, calls):
         self.calls = calls

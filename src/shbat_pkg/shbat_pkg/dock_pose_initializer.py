@@ -27,6 +27,7 @@ import rclpy
 import yaml
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from nav_msgs.msg import Odometry
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (
     DurabilityPolicy,
@@ -213,7 +214,17 @@ class DockPoseInitializer(Node):
         if text == self.last_status:
             return
         self.last_status = text
-        getattr(self.get_logger(), level)(text)
+        # One call site per severity: rclpy raises ValueError when the same
+        # line logs at a different severity than its first call, which
+        # crashed this node the first time an INFO status followed a WARN
+        # (e.g. on a successful dock match).
+        logger = self.get_logger()
+        if level == 'warn':
+            logger.warning(text)
+        elif level == 'error':
+            logger.error(text)
+        else:
+            logger.info(text)
         self.status_pub.publish(String(data=text))
 
     def begin(self):
@@ -322,7 +333,7 @@ def main(args=None):
     node = DockPoseInitializer()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

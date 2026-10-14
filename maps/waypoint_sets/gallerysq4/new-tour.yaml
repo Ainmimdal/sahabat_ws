@@ -1,5 +1,5 @@
 name: New Tour
-revision: 8
+revision: 9
 waypoints:
 - id: 5a6bea3dedaa410ab4ee8f9fb37c8379
   name: waypoint_3
@@ -54,7 +54,7 @@ segments:
   - id: rp-001
     name: rp-001
     x: -0.08
-    y: 3.912
+    y: 4.01
     yaw: 1.236
     dwell_seconds: 0.0
     enabled: true
@@ -123,8 +123,8 @@ segments:
     enabled: true
   - id: rp-009
     name: rp-009
-    x: 2.5
-    y: 14.05
+    x: 2.15
+    y: 14.3
     yaw: -0.1
     dwell_seconds: 0.0
     enabled: true
@@ -144,8 +144,8 @@ segments:
   via_points:
   - id: rp-011
     name: rp-011
-    x: 8.7
-    y: 13.05
+    x: 8.8
+    y: 13.0
     yaw: 1.045
     dwell_seconds: 0.0
     enabled: true
@@ -158,15 +158,15 @@ segments:
     enabled: true
   - id: rp-013
     name: rp-013
-    x: 11.3
-    y: 18.05
+    x: 11.55
+    y: 17.9
     yaw: 2.015
     dwell_seconds: 0.0
     enabled: true
   - id: rp-014
     name: rp-014
     x: 10.8
-    y: 19.1
+    y: 19.3
     yaw: 2.379
     dwell_seconds: 0.0
     enabled: true
@@ -179,22 +179,22 @@ segments:
     enabled: true
   - id: rp-016
     name: rp-016
-    x: 7.45
-    y: 23.55
+    x: 7.75
+    y: 23.4
     yaw: 2.065
     dwell_seconds: 0.0
     enabled: true
   - id: rp-017
     name: rp-017
-    x: 6.75
+    x: 6.5
     y: 24.85
     yaw: 1.432
     dwell_seconds: 0.0
     enabled: true
   - id: rp-018
     name: rp-018
-    x: 7.1
-    y: 27.35
+    x: 7.15
+    y: 27.3
     yaw: 0.431
     dwell_seconds: 0.0
     enabled: true
@@ -208,7 +208,7 @@ segments:
   - id: rp-020
     name: rp-020
     x: 12.1
-    y: 27.7
+    y: 27.5
     yaw: -0.726
     dwell_seconds: 0.0
     enabled: true
@@ -221,8 +221,8 @@ segments:
   via_points:
   - id: rp-021
     name: rp-021
-    x: 15.6
-    y: 26.3
+    x: 15.5
+    y: 26.25
     yaw: -0.972
     dwell_seconds: 0.0
     enabled: true
@@ -242,28 +242,28 @@ segments:
   via_points:
   - id: rp-023
     name: rp-023
-    x: 15.4
+    x: 15.25
     y: 20.4
     yaw: -1.88
     dwell_seconds: 0.0
     enabled: true
   - id: rp-024
     name: rp-024
-    x: 14.6
+    x: 14.65
     y: 17.9
     yaw: -1.825
     dwell_seconds: 0.0
     enabled: true
   - id: rp-025
     name: rp-025
-    x: 13.95
-    y: 15.4
+    x: 14.0
+    y: 16.05
     yaw: -1.951
     dwell_seconds: 0.0
     enabled: true
   - id: rp-026
     name: rp-026
-    x: 12.95
+    x: 12.7
     y: 12.9
     yaw: -2.14
     dwell_seconds: 0.0
@@ -298,8 +298,8 @@ segments:
     enabled: true
   - id: rp-031
     name: rp-031
-    x: 6.3
-    y: 0.4
+    x: 6.55
+    y: 1.0
     yaw: -2.279
     dwell_seconds: 0.0
     enabled: true

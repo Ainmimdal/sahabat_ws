@@ -68,13 +68,18 @@ async function cmd(op, args = {}, quiet = false) {
 }
 const safe = (p) => p.catch(() => undefined);
 
-function dialog({ title, text = '', input = null, okText = 'OK', danger = false }) {
+// With `check: { label, checked }` the dialog shows a checkbox and resolves
+// to { checked } on OK (null on cancel).
+function dialog({ title, text = '', input = null, okText = 'OK', danger = false, check = null }) {
   const dlg = $('dlg');
   $('dlg-title').textContent = title;
   $('dlg-text').textContent = text;
   const inp = $('dlg-input');
   inp.classList.toggle('hidden', input === null);
   inp.value = input ?? '';
+  $('dlg-check').classList.toggle('hidden', check === null);
+  $('dlg-check-label').textContent = check?.label ?? '';
+  $('dlg-check-box').checked = !!check?.checked;
   $('dlg-ok').textContent = okText;
   $('dlg-ok').style.background = danger ? 'var(--bad)' : '';
   $('dlg-ok').style.borderColor = danger ? 'var(--bad)' : '';
@@ -87,7 +92,9 @@ function dialog({ title, text = '', input = null, okText = 'OK', danger = false 
       done = true;
       $('dlg-ok').onclick = $('dlg-cancel').onclick = dlg.oncancel = dlg.onclose = null;
       if (dlg.open) dlg.close();
-      resolve(ok ? (input === null ? true : inp.value.trim()) : null);
+      if (!ok) return resolve(null);
+      if (check !== null) return resolve({ checked: $('dlg-check-box').checked });
+      resolve(input === null ? true : inp.value.trim());
     };
     $('dlg-ok').onclick = (e) => { e.preventDefault(); finish(true); };
     $('dlg-cancel').onclick = (e) => { e.preventDefault(); finish(false); };
@@ -1012,10 +1019,19 @@ async function switchMode(mode, mapId = '') {
     mapping: 'Start a new mapping session? The robot stack starts with SLAM, so drive slowly to build the map.',
     idle: 'Stop the robot software? Motors, lidar and navigation turn off. Control and E-stop stay available.',
   }[mode];
-  const ok = await dialog({ title: `Switch to ${MODE_TEXT[mode]}`, text, okText: mode === 'idle' ? 'Stop' : 'Start' });
+  const check = mode === 'operations' ? {
+    label: 'Use the ZED camera (AprilTags) to localize. Leave off when the robot starts at the dock: the lidar dock match does not need the camera, and the camera adds CPU load.',
+    checked: store('sahabat.useZed') === 'true',
+  } : null;
+  const ok = await dialog({ title: `Switch to ${MODE_TEXT[mode]}`, text, okText: mode === 'idle' ? 'Stop' : 'Start', check });
   if (!ok) return;
+  const request = { mode, map_id: mapId };
+  if (check) {
+    request.use_zed = ok.checked;
+    store('sahabat.useZed', String(ok.checked));
+  }
   $('mode-dlg').close();
-  try { await cmd('set_mode', { mode, map_id: mapId }); } catch (_e) { /* toast shown */ }
+  try { await cmd('set_mode', request); } catch (_e) { /* toast shown */ }
 }
 $('start-operate').onclick = () => switchMode('operations', S.startMap);
 $('start-mapping').onclick = () => switchMode('mapping');
@@ -1026,7 +1042,7 @@ $('mode-pill').onclick = async () => {
   body.innerHTML = '';
   const cur = document.createElement('p');
   cur.className = 'mode-current';
-  cur.textContent = `Now: ${MODE_TEXT[mode] || 'unknown'}${S.status?.active_map && mode !== 'mapping' && mode !== 'idle' ? ` on ${S.status.active_map}` : ''}.`;
+  cur.textContent = `Now: ${MODE_TEXT[mode] || 'unknown'}${S.status?.active_map && mode !== 'mapping' && mode !== 'idle' ? ` on ${S.status.active_map}` : ''}${mode === 'operations' && S.mode.managed ? (S.mode.use_zed ? ', camera on' : ', camera off') : ''}.`;
   body.appendChild(cur);
   if (!S.mode.managed) {
     const p = document.createElement('p');

@@ -49,6 +49,10 @@ def test_zed_wrapper_is_image_only_and_apriltag_gated():
     assert 'point_cloud/cloud_registered' not in launch_text
     assert 'hardware_and(use_zed)' not in launch_text
     assert launch_text.count('condition=zed_apriltag_hardware_condition()') == 4
+    # Conservative camera load: VGA, 10 fps, grey image into apriltag.
+    assert "'general.grab_resolution': 'VGA'" in launch_text
+    assert "'general.pub_frame_rate': 10.0" in launch_text
+    assert "('image_rect', '/zed/zed_node/left_gray/image_rect_gray')" in launch_text
 
     operations_text = (
         PACKAGE_ROOT / 'launch' / 'operations.launch.py'

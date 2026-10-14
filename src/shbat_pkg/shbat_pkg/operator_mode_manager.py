@@ -22,13 +22,19 @@ def _map_exists(maps_directory: Path, map_id: str) -> bool:
     return stem.with_suffix('.yaml').exists() or (stem / 'map.yaml').exists()
 
 
-def full_stack_command(mode: str, map_id: str, maps_directory: Path):
+def full_stack_command(
+    mode: str, map_id: str, maps_directory: Path, use_zed: bool = False
+):
     """Commands for the 'full' profile used by robot.launch.py.
 
     Each mode starts the complete, physically proven stack (hardware drivers
     included) exactly as the desktop shortcuts do: mapping matches
     "Sahabat New Mapping" and operations matches "Sahabat Waypoint Editor
     Live", both without RViz. Switching mode therefore restarts the drivers.
+
+    ``use_zed`` starts the ZED camera and AprilTag localization in
+    operations. It is off by default: the lidar dock match localizes without
+    the camera, and the camera adds load to an already saturated Jetson.
     """
     if mode == 'mapping':
         return [
@@ -45,7 +51,7 @@ def full_stack_command(mode: str, map_id: str, maps_directory: Path):
             'use_rviz:=false',
             'use_waypoint_gui:=false',
             'use_api:=true',
-            'use_zed:=true',
+            f'use_zed:={str(bool(use_zed)).lower()}',
             'localization_backend:=amcl',
         ]
     return None
@@ -64,6 +70,9 @@ class OperatorModeManager(Node):
         self.declare_parameter('stack', 'core')
         self.declare_parameter('initial_mode', 'idle')
         self.declare_parameter('initial_map', '')
+        # Camera (ZED + AprilTag) for the next Operating start; the web
+        # console sets it per start, robot.launch.py sets the default.
+        self.declare_parameter('use_zed', False)
         self.stack = str(self.get_parameter('stack').value)
         self.maps_directory = Path(
             str(self.get_parameter('maps_directory').value)
@@ -71,6 +80,7 @@ class OperatorModeManager(Node):
         self.process = None
         self.mode = 'idle'
         self.map_id = ''
+        self.use_zed = False
         self.lock = threading.Lock()
         transient = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -139,7 +149,13 @@ class OperatorModeManager(Node):
     def _command(self, mode: str, map_id: str):
         """Build the established launch command for one requested mode."""
         if self.stack == 'full':
-            command = full_stack_command(mode, map_id, self.maps_directory)
+            self.use_zed = (
+                mode == 'operations'
+                and bool(self.get_parameter('use_zed').value)
+            )
+            command = full_stack_command(
+                mode, map_id, self.maps_directory, self.use_zed
+            )
             if command is not None and mode == 'operations':
                 try:
                     (self.maps_directory / 'last_selected_map').write_text(
@@ -238,6 +254,7 @@ class OperatorModeManager(Node):
             'mode': self.mode,
             'map_id': self.map_id,
             'detail': detail,
+            'use_zed': self.use_zed if self.mode == 'operations' else False,
         }
         self.state_pub.publish(String(data=json.dumps(message)))
 

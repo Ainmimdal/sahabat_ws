@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 
 from shbat_pkg.scan_matcher import (
-    LikelihoodField, MatchResult, accept, evaluate, scan_to_points, search,
+    LikelihoodField, MatchResult, accept, evaluate, planar_rotation,
+    scan_to_points, search,
 )
 
 
@@ -71,6 +72,60 @@ def test_visitors_occluding_beams_still_match():
     result = search(field, points, (5.2, 2.2, -1.0))
     assert math.hypot(result.x - truth[0], result.y - truth[1]) < 0.06
     assert accept(result, 0.55, 0.9)[0]
+
+
+def _quaternion_from_rpy(roll, pitch, yaw):
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    )
+
+
+def test_planar_rotation_of_upside_down_lidar_is_a_mirror():
+    # lidar_joint rpy="3.14 0 3.14": sensor (x, y) lands at base (-x, +y).
+    rotation = planar_rotation(*_quaternion_from_rpy(3.14, 0.0, 3.14))
+    np.testing.assert_allclose(rotation, [[-1.0, 0.0], [0.0, 1.0]], atol=0.01)
+    level = planar_rotation(*_quaternion_from_rpy(0.0, 0.0, 0.4))
+    np.testing.assert_allclose(
+        level, [[math.cos(0.4), -math.sin(0.4)], [math.sin(0.4), math.cos(0.4)]],
+    )
+
+
+def test_upside_down_lidar_scan_matches_with_full_rotation():
+    rng = np.random.default_rng(4)
+    grid = _room_grid()
+    field = LikelihoodField(grid, 0.05, 0.0, 0.0)
+    truth = (2.3, 3.1, 0.35)
+    angles, ranges = _raycast(grid, 0.05, (0.0, 0.0), truth)
+    ranges = ranges + rng.normal(0.0, 0.015, ranges.shape)
+    # An upside-down lidar reports the beam at base angle a as sensor angle
+    # pi - a, so reverse the scan order and flip its angles.
+    sensor_angles = np.arctan2(np.sin(math.pi - angles), np.cos(math.pi - angles))
+    order = np.argsort(sensor_angles)
+    sensor_ranges = ranges[order]
+    increment = angles[1] - angles[0]
+    rotation = planar_rotation(*_quaternion_from_rpy(math.pi, 0.0, math.pi))
+    points = scan_to_points(
+        sensor_ranges, sensor_angles[order][0], increment, 0.1, 12.0,
+        sensor_rotation=rotation,
+    )
+    prior = (truth[0] + 0.3, truth[1] - 0.2, truth[2] - math.radians(15))
+    result = search(field, points, prior)
+    assert math.hypot(result.x - truth[0], result.y - truth[1]) < 0.05
+    assert accept(result, 0.55, 0.9)[0]
+    mirrored = scan_to_points(
+        sensor_ranges, sensor_angles[order][0], increment, 0.1, 12.0,
+        sensor_yaw=math.pi,
+    )
+    # The old yaw-only projection mirrors the scan; in a near-symmetric room
+    # it can even pass the gate at the wrong heading.
+    wrong = search(field, mirrored, prior)
+    assert abs(wrong.yaw - truth[2]) > math.radians(20)
 
 
 def test_wrong_pose_is_rejected_by_inlier_gate():
